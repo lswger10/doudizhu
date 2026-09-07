@@ -11,7 +11,7 @@ const publicDir = path.join(rootDir, "public");
 const dataDir = path.resolve(process.env.DOUDIZHU_DATA_DIR || path.join(rootDir, "data/doudizhu"));
 const host = process.env.HOST || "127.0.0.1";
 const port = Math.max(1, Number(process.env.PORT) || 8788);
-const maxBodyBytes = 256 * 1024;
+const maxBodyBytes = 3 * 1024 * 1024; // 2 MiB avatar plus base64 and JSON overhead.
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],

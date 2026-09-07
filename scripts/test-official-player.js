@@ -13,21 +13,23 @@ try {
   await service.ready();
   assert.equal(typeof service.joinOfficial, 'function', 'an external player must be able to claim an independent seat');
   const { lease_id: lease } = await service.joinOfficial();
-  await service.updateProfile('aevi', {name:'椒椒测试名'});
-  assert.equal(service.profiles.players.aevi.name, '椒椒测试名', 'display alias must not swallow stored profile edits');
-  assert.equal(service.profile('aevi').name, '官端椒椒');
+  await service.updateProfile('chatgpt', {name:'椒椒测试名'});
+  assert.equal(service.profiles.players.chatgpt.name, '椒椒测试名', 'display alias must not swallow stored profile edits');
+  assert.equal(service.profile('chatgpt').name, '椒椒测试名');
+  assert.equal(service.profile('aevi').name, '椒椒');
   assert.equal((await service.leaveOfficial(lease, true)).left, false, 'an obsolete expiry callback must not release a renewed lease');
   await assert.rejects(service.joinOfficial(), /occupied/);
   await assert.rejects(service.readOfficial('wrong'), /lease/);
   assert.equal(JSON.stringify(service.publicSnapshot()).includes(lease), false);
-  await service.startMatch(4, ['aevi', 'vex'], 'official');
+  service.playerConfig('vex').kind = 'human';
+  await service.startMatch(4, ['chatgpt', 'vex'], 'official');
   service.clearTimers();
-  await service.runAiTurn('aevi', service.state.timer?.token, Date.now() + 1000);
-  await service.runAiChatReply('aevi', 'aurex', 'hello');
-  await service.runAiInteractionReply('aevi', {playerId: 'aurex'});
-  await service.runDissolveVote('aevi', 'test', Date.now() + 1000);
-  assert.equal(calls.includes('aevi'), false, 'no provider may drive the official seat');
-  assert.equal(service.publicSnapshot().players.find(p => p.id === 'aevi').name, '官端椒椒');
+  await service.runAiTurn('chatgpt', service.state.timer?.token, Date.now() + 1000);
+  await service.runAiChatReply('chatgpt', 'aurex', 'hello');
+  await service.runAiInteractionReply('chatgpt', {playerId: 'aurex'});
+  await service.runDissolveVote('chatgpt', 'test', Date.now() + 1000);
+  assert.equal(calls.includes('chatgpt'), false, 'no provider may drive the official seat');
+  assert.equal(service.publicSnapshot().players.find(p => p.id === 'chatgpt').name, '椒椒测试名');
 
   // A waiting controller must not hold the referee queue or miss real chat events.
   // Keep the other seat manually driven so an unrelated provider failure cannot race the cursor.
@@ -35,11 +37,11 @@ try {
   const initial = await service.readOfficial(lease);
   assert.equal(typeof initial.cursor, 'string');
   const beforeListeners = service.listeners.size;
-  const waiting = service.waitOfficial(lease, initial.cursor, 1000);
+  const waiting = service.waitOfficial(lease, initial.cursor, 1000, undefined, initial.last_event_id);
   await service.enqueue(() => service.applyChat('aurex', '轮到你啦'));
   const changed = await waiting;
   assert.notEqual(changed.cursor, initial.cursor);
-  assert.ok(changed.table_events.some(e => e.type === 'chat' && e.text === '轮到你啦'));
+  assert.ok(changed.new_events.some(e => e.type === 'chat' && e.text === '轮到你啦'));
   assert.equal(service.listeners.size, beforeListeners);
   const timeout = await service.waitOfficial(lease, changed.cursor, 10);
   assert.equal(timeout.cursor, changed.cursor);
@@ -53,20 +55,26 @@ try {
   const reply = {type:'chat', text:'来啦'};
   const social = await service.interactOfficial(lease, changed.match_id, changed.cursor, reply);
   assert.equal(social.accepted, true);
-  assert.equal(service.state.feed.at(-1).playerId, 'aevi');
-  await assert.rejects(service.interactOfficial(lease, changed.match_id, changed.cursor, reply), /changed/);
+  assert.equal(service.state.feed.at(-1).playerId, 'chatgpt');
+  assert.equal((await service.interactOfficial(lease, changed.match_id, changed.cursor, reply)).duplicate, true);
+  await assert.rejects(service.interactOfficial(lease, changed.match_id, changed.cursor, {type:'chat',text:'不同'}), /different/);
   const afterChat = await service.readOfficial(lease);
   const thrown = await service.interactOfficial(lease, afterChat.match_id, afterChat.cursor, {type:'prop', prop:'tomato', target_id:'aurex'});
   assert.equal(thrown.accepted, true);
-  assert.equal(service.state.round.propUses.aevi, 1);
-  assert.ok(thrown.next.table_events.some(e => e.prop === 'tomato'));
+  assert.equal(service.state.round.propUses.chatgpt, 1);
+  assert.ok(service.publicSnapshot().match.chatTranscript.some(e => e.prop === 'tomato'));
+  assert.equal(service.publicSnapshot().match.chatTranscript.filter(e => e.text === '来啦').length, 1);
+  service.state.phase = 'match_end';
+  assert.equal((await service.interactOfficial(lease, changed.match_id, changed.cursor, reply)).duplicate, true);
+  await assert.rejects(service.interactOfficial(lease, changed.match_id, crypto.randomUUID(), reply), /not active/);
+  service.state.phase = 'bid';
 
   // Drive the real referee into Jiao's bidding turn without a live model.
-  service.state.round.currentPlayerId = 'aevi';
+  service.state.round.currentPlayerId = 'chatgpt';
   await service.scheduleTurn();
   service.clearTimers();
   const view = await service.readOfficial(lease);
-  assert.deepEqual(view.hand, service.state.round.hands.aevi);
+  assert.deepEqual(view.hand, service.state.round.hands.chatgpt);
   assert.equal(view.hand.some(card => service.state.round.hands.aurex.includes(card)), false);
   assert.deepEqual(view.landlord_cards, [], 'bottom cards are hidden before bidding ends');
   assert.equal(view.is_your_turn, true);
@@ -105,9 +113,9 @@ try {
   assert.equal(service.state.phase, 'lobby');
   assert.equal(service.history.at(-1).status, 'stopped');
   await assert.rejects(service.readOfficial(lease), /lease/);
-  await assert.rejects(service.startMatch(4, ['aevi','vex'], 'official'), /connected/);
+  await assert.rejects(service.startMatch(4, ['chatgpt','vex'], 'official'), /connected/);
   const second = await service.joinOfficial();
-  await service.startMatch(4, ['aevi','vex'], 'official');
+  await service.startMatch(4, ['chatgpt','vex'], 'official');
   service.clearTimers();
   service.state.phase = 'match_end';
   service.history.push({...service.state.match, status:'completed'});

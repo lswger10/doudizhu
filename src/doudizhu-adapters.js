@@ -167,6 +167,13 @@ export function defaultDoudizhuPlayers(rootDir = process.cwd()) {
       persona: { talkativeness: 0.55 },
     },
     {
+      id: "chatgpt",
+      name: "官端椒椒",
+      kind: "official",
+      avatar: "/doudizhu/assets/avatars/juhua.svg",
+      persona: { talkativeness: 0 },
+    },
+    {
       id: "juhua",
       name: "本地牌友",
       kind: "cmd",

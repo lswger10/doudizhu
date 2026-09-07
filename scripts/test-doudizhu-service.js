@@ -136,15 +136,15 @@ async function cleanup(service, dataDir) {
     service.state.round.number = 2;
     await service.applyChat("aevi", "第二局加油", { skipRateLimit: true });
     await service.applyEmote("vex", "emoji_01", { skipRateLimit: true });
-    assert.equal(service.state.match.chatTranscript.length, 2, "本场记录只应收集文字聊天");
-    assert.deepEqual(service.state.match.chatTranscript.map((item) => item.round), [1, 2]);
-    assert.deepEqual(service.state.match.chatTranscript.map((item) => item.text), ["第一局好险", "第二局加油"]);
-    assert.equal(service.publicSnapshot("aurex").match.chatTranscript.length, 0, "整场结束前不应弹出结算聊天记录");
+    assert.equal(service.state.match.chatTranscript.length, 3, "本场记录应收集聊天和表情");
+    assert.deepEqual(service.state.match.chatTranscript.map((item) => item.round), [1, 2, 2]);
+    assert.deepEqual(service.state.match.chatTranscript.filter((item) => item.type === "chat").map((item) => item.text), ["第一局好险", "第二局加油"]);
+    assert.equal(service.publicSnapshot("aurex").match.chatTranscript.length, 3, "比赛中也能读取本局聊天互动");
     service.state.phase = "match_end";
     const finalSnapshot = service.publicSnapshot("aurex");
-    assert.deepEqual(finalSnapshot.match.chatTranscript.map((item) => item.playerName), ["薇薇", "椒椒"]);
+    assert.deepEqual(finalSnapshot.match.chatTranscript.map((item) => item.playerName), ["薇薇", "椒椒", "老克"]);
     const persisted = JSON.parse(await fs.readFile(path.join(dataDir, "state.json"), "utf8"));
-    assert.equal(persisted.match.chatTranscript.length, 2, "聊天记录必须随牌局状态持久化");
+    assert.equal(persisted.match.chatTranscript.length, 3, "聊天互动必须随牌局状态持久化");
   } finally {
     await cleanup(service, dataDir);
   }
@@ -177,7 +177,7 @@ async function cleanup(service, dataDir) {
   await service.ready();
   try {
     const transcript = service.publicSnapshot("aurex").match.chatTranscript;
-    assert.deepEqual(transcript.map((item) => [item.round, item.text]), [[1, "旧第一局"], [2, "旧第二局"]], "升级时应从旧事件恢复当前牌局聊天");
+    assert.deepEqual(transcript.map((item) => [item.round, item.text]), [[1, "旧第一局"], [2, "表情"], [2, "旧第二局"]], "升级时应从旧事件恢复当前牌局聊天");
   } finally {
     await cleanup(service, dataDir);
   }

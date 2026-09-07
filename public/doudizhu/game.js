@@ -2,6 +2,11 @@
   "use strict";
 
   var game = document.getElementById("game");
+  var scene = document.createElement("div");
+  scene.className = "table-scene";
+  var chatLayer = document.createElement("div");
+  var settingsLayer = document.createElement("div");
+  game.append(scene, chatLayer, settingsLayer);
   var effects = document.getElementById("effects");
   var particleCanvas = document.getElementById("particleCanvas");
   var musicPlayer = document.getElementById("musicPlayer");
@@ -24,7 +29,7 @@
   var targetId = "aevi";
   var cardGesture = null;
   var suppressCardClickUntil = 0;
-  var playerMode = "local";
+
   var roundChoice = Number(localStorage.getItem("aevi_ddz_rounds") || 4);
   var musicVolume = clamp(Number(localStorage.getItem("aevi_ddz_music_volume") || 0.42), 0, 1);
   var effectVolume = clamp(Number(localStorage.getItem("aevi_ddz_effect_volume") || 0.74), 0, 1);
@@ -36,7 +41,7 @@
   var selectedAiIds = (function () {
     try {
       var saved = JSON.parse(localStorage.getItem("aevi_ddz_ai_players") || "[]");
-      if (Array.isArray(saved) && saved.length === 2 && saved.every(function (id) { return ["aevi", "vex", "juhua"].indexOf(id) >= 0; })) return saved;
+      if (Array.isArray(saved) && saved.length === 2 && saved.every(function (id) { return ["aevi", "vex", "juhua", "chatgpt"].indexOf(id) >= 0; })) return saved;
     } catch (_) {}
     return ["aevi", "vex"];
   })();
@@ -67,6 +72,30 @@
 
   function playerById(id) {
     return state && state.players ? state.players.find(function (player) { return player.id === id; }) : null;
+  }
+
+  function avatarUrl(player) {
+    if (player.avatar && player.avatar.indexOf("/doudizhu/assets/avatars/") !== 0) return player.avatar;
+    var icons = {aurex:"🌷", aevi:"🌶️", vex:"🌳", chatgpt:"🏮", juhua:"🌼"};
+    return "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="120" height="120" rx="60" fill="#f5ebd8"/><circle cx="60" cy="60" r="52" fill="#e4eadc"/><text x="60" y="80" text-anchor="middle" font-size="58">' + (icons[player.id] || "☺") + '</text></svg>');
+  }
+
+  function playerSource(id) {
+    return {aurex:"你", aevi:"小树屋椒椒 · API", vex:"小树屋老克 · API", chatgpt:"官端 ChatGPT 椒椒", juhua:"本地牌友 · 策略"}[id] || "牌友";
+  }
+
+  function selectionNotes(ids) {
+    var notes = [];
+    if (ids.some(function (id) { return id === "aevi" || id === "vex"; })) notes.push("小树屋牌友使用 Gateway 当前人设，不读取私聊记录；API 请求可能产生费用。");
+    if (ids.indexOf("chatgpt") >= 0) notes.push("官端椒椒须先通过 MCP 入座；仅在当前回复内等待，回复结束后不会自动唤醒，120 秒超时由裁判代打。");
+    if (ids.indexOf("juhua") >= 0) notes.push("本地牌友使用本地策略，不调用模型。");
+    return notes.join(" ");
+  }
+
+  function socialText(item) {
+    if (item.type === "emote") return "表情 " + String(Number((item.emote || "").slice(-2)) || "");
+    if (item.type === "prop") return "向 " + (item.targetName || (playerById(item.targetId) || {}).name || "牌友") + " " + ({tomato:"🍅 扔番茄",egg:"🥚 扔臭鸡蛋",cheers:"🍻 干杯"}[item.prop] || "互动");
+    return item.text || "";
   }
 
   function matchTranscript() {
@@ -105,7 +134,7 @@
     var content = items.length
       ? transcriptGroups(items).map(function (group) {
           return '<section class="match-transcript-round"><h3>第 ' + escapeHtml(group.round) + ' 局</h3>' + group.items.map(function (item) {
-            return '<div class="match-transcript-row"><time>' + escapeHtml(transcriptTime(item.at)) + '</time><strong>' + escapeHtml(transcriptPlayerName(item)) + '</strong><span>' + escapeHtml(item.text) + '</span></div>';
+            return '<div class="match-transcript-row"><time>' + escapeHtml(transcriptTime(item.at)) + '</time><strong>' + escapeHtml(transcriptPlayerName(item)) + '</strong><span>' + escapeHtml(socialText(item)) + '</span></div>';
           }).join("") + "</section>";
         }).join("")
       : '<p class="match-transcript-empty">本场没人说话。</p>';
@@ -126,7 +155,7 @@
         activeRound = round;
         lines.push("", "第 " + round + " 局");
       }
-      lines.push("[" + transcriptTime(item.at) + "] " + transcriptPlayerName(item) + "：" + String(item.text || ""));
+      lines.push("[" + transcriptTime(item.at) + "] " + transcriptPlayerName(item) + "：" + socialText(item));
     });
     if (!items.length) lines.push("", "本场没人说话。");
     return lines.join("\n");
@@ -217,7 +246,7 @@
     return (
       '<section class="player-seat' + (isTurn ? " is-turn" : "") + '" data-player="' + escapeAttr(player.id) + '" data-seat="' + Number(player.seatIndex || 0) + '">' +
       '<span class="seat-score">' + (state.match ? "本场 " : "总分 ") + escapeHtml(signed(score)) + "</span>" +
-      '<div class="avatar-wrap">' + timerMarkup(player.id) + '<img src="' + escapeAttr(player.avatar) + '" alt="' + escapeAttr(player.name) + '" />' + role + "</div>" +
+      '<div class="avatar-wrap">' + timerMarkup(player.id) + '<img src="' + escapeAttr(avatarUrl(player)) + '" alt="' + escapeAttr(player.name) + '" />' + role + "</div>" +
       '<span class="hand-count">' + escapeHtml(String(player.handCount)) + " 张</span>" +
       '<span class="seat-name">' + escapeHtml(player.name) + "</span>" +
       (bubble ? '<span class="speech-bubble">' + escapeHtml(bubble.text) + "</span>" : "") +
@@ -235,7 +264,7 @@
   }
 
   function renderBackButton() {
-    return '<button class="table-back-button glass" type="button" data-table-back="true" aria-label="返回巢">‹ 巢</button>';
+    return '<a class="table-back-button glass" href="/" target="_top" aria-label="返回小家">‹ 回巢</a>';
   }
 
   function renderCenter() {
@@ -281,7 +310,7 @@
     }
     if (["bid", "play"].indexOf(state.phase) >= 0) {
       var current = playerById(state.round.currentPlayerId);
-      return '<div class="turn-actions"><span class="action-button" aria-live="polite">' + escapeHtml((current && current.name) || "对家") + " 思考中…</span></div>";
+      return '<div class="turn-actions"><span class="action-button" aria-live="polite">' + escapeHtml((current && current.name) || "对家") + " · 正在等 TA 出牌…</span></div>";
     }
     return "";
   }
@@ -360,7 +389,7 @@
     if (!chatOpen) return "";
     return (
       '<div class="drawer-backdrop chat-backdrop" data-close-chat="true"><section class="chat-drawer" data-chat-stop="true">' +
-      '<div class="chat-row"><input data-chat-input="true" maxlength="10" enterkeyhint="send" autocomplete="off" placeholder="牌桌聊天，所有人都能听见" /><button type="button" data-send-chat="true">发送</button></div>' +
+      '<header class="chat-panel-head"><strong>本局聊天与互动</strong><button type="button" data-close-chat-button="true" aria-label="收起对话">×</button></header><div class="table-chat-history" role="log" aria-label="本局聊天与互动"></div><div class="chat-row"><input data-chat-input="true" aria-label="牌桌消息" maxlength="20" enterkeyhint="send" autocomplete="off" placeholder="牌桌聊天，所有人都能听见" /><button type="button" data-send-chat="true">发送</button></div>' +
       "</section></div>"
     );
   }
@@ -380,7 +409,7 @@
       '<div class="modal-backdrop" data-close-settings="true"><section class="settings-panel glass" data-settings-stop="true">' +
       '<header class="panel-head"><div><span class="lobby-kicker">斗地主专属</span><h2>牌桌设置</h2></div><button class="close-button" type="button" data-close-settings-button="true">×</button></header>' +
       '<section class="settings-section"><h3>头像与昵称</h3><div class="profile-editor-list">' + state.players.map(function (player) {
-        return '<article class="profile-editor"><img src="' + escapeAttr(player.avatar) + '" alt=""><input type="text" maxlength="12" value="' + escapeAttr(player.name) + '" data-name-input="' + player.id + '"><button type="button" data-save-name="' + player.id + '">保存昵称</button><button type="button" data-pick-avatar="' + player.id + '">更换头像</button><input hidden type="file" accept="image/png,image/jpeg,image/webp" data-avatar-input="' + player.id + '"></article>';
+        return '<article class="profile-editor"><span>' + escapeHtml(playerSource(player.id)) + '</span><img data-profile-avatar="' + player.id + '" src="' + escapeAttr(avatarUrl(player)) + '" alt=""><input type="text" maxlength="12" value="' + escapeAttr(player.name) + '" data-name-input="' + player.id + '"><button type="button" data-save-name="' + player.id + '">保存昵称</button><button type="button" data-pick-avatar="' + player.id + '">更换头像</button><input hidden type="file" accept="image/png,image/jpeg,image/webp" data-avatar-input="' + player.id + '"></article>';
       }).join("") + "</div></section>" +
       '<section class="settings-section"><h3>桌布</h3><div class="theme-picker">' + themeButton("jade", "青玉桃花") + themeButton("sakura", "樱花软席") + themeButton("camp", "暮色营地") + themeButton("beach", "海岛蓝毯") + "</div></section>" +
       '<section class="settings-section"><h3>声音</h3><label class="volume-row"><span>音乐</span><input type="range" min="0" max="1" step="0.01" value="' + musicVolume + '" data-music-volume="true"><output>' + Math.round(musicVolume * 100) + '%</output></label><label class="volume-row"><span>音效</span><input type="range" min="0" max="1" step="0.01" value="' + effectVolume + '" data-effect-volume="true"><output>' + Math.round(effectVolume * 100) + "%</output></label></section>" +
@@ -391,42 +420,50 @@
 
   function renderLobby() {
     var players = state.players || [];
-    var selectedNames = selectedAiIds.map(function (id) { return (players.find(function (player) { return player.id === id; }) || {}).name || id; });
-    return (
-      '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">薇薇 × ' + escapeHtml(selectedNames.join(" × ")) + '</span><h1>家庭斗地主</h1><p>从名册点两位 AI 上桌 · 没选中的不会调用</p><div class="lobby-players">' +
-      players.map(function (player) {
-        var fixed = player.id === "aurex" || playerMode !== "local";
-        var selected = player.id === "aurex" || selectedAiIds.indexOf(player.id) >= 0;
-        var tag = player.id === "aurex" ? "固定座位" : selected ? "已上桌" : playerMode !== "local" ? "仅本地模式" : "点选上桌";
-        return '<button class="lobby-player' + (selected ? " selected" : "") + (fixed ? " fixed" : " selectable") + '" type="button" ' + (fixed ? "disabled" : 'data-ai-player="' + escapeAttr(player.id) + '"') + '><img src="' + escapeAttr(player.avatar) + '" alt="' + escapeAttr(player.name) + '"><strong>' + escapeHtml(player.name) + '</strong><span>' + tag + ' · 总分 ' + escapeHtml(signed(player.totalScore)) + "</span></button>";
-      }).join("") +
-      '</div><div class="mode-picker"><button type="button" class="round-option ' + (playerMode==='local'?'active':'') + '" data-player-mode="local">本地策略</button><button type="button" class="round-option ' + (playerMode==='model'?'active':'') + '" data-player-mode="model" ' + (state.modelAvailable?'':'disabled') + '>椒椒·老克模型</button>' + (state.officialAvailable ? '<button type="button" class="round-option ' + (playerMode==='official'?'active':'') + '" data-player-mode="official" ' + (state.modelAvailable?'':'disabled') + '>官端椒椒</button>' : '') + '</div><p class="mode-note">' + (playerMode==='official'?'椒椒通过官方 ChatGPT 会话和 MCP 决策，API 不再代其决策。老克仍使用 Gateway 模型，可能产生费用；会话能否持续运行取决于客户端，超时由裁判代打。' + (!state.officialConnected?' MCP 席位尚未连接。连接后，由游戏主人选中「官端椒椒」模式，即可开桌。':''):playerMode==='model'?'使用 Gateway 当前选定的 Profile。叫分、出牌和牌桌聊天可能产生费用，按供应商实际用量计费，每局价格无法预先确定。开局后不能切换模式。停止或关闭牌桌后，不再发起新的模型请求；已发出的请求可能已产生费用。':'不调用付费模型。开局后不能切换模式。') + '</p><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) {
-        return '<button class="round-option ' + (roundChoice === rounds ? "active" : "") + '" type="button" data-rounds="' + rounds + '">' + rounds + " 局</button>";
-      }).join("") + '</div><button class="start-button" type="button" data-start="true" ' + (selectedAiIds.length === 2 && (playerMode !== "official" || state.officialConnected) ? "" : "disabled") + '>开桌</button><div class="leaderboard">' + (state.leaderboard || []).map(function (item, index) {
-        return '<span>' + (index + 1) + '. <strong>' + escapeHtml(item.name) + "</strong> " + escapeHtml(signed(item.score)) + "</span>";
-      }).join("") + "</div></div></section>" +
-      '<button class="settings-button" type="button" data-open-settings="true" aria-label="斗地主设置">⚙</button>' + renderSettingsPanel() + "</div>"
-    );
+    var unavailable = selectedAiIds.some(function (id) { return (id === "chatgpt" && !state.officialConnected) || (["aevi","vex"].indexOf(id) >= 0 && !state.modelAvailable); });
+    return '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">小家娱乐室</span><h1>一起打牌吧</h1><p>你固定占一席，请选择另外两位不同牌友。开局后不能换人。</p><div class="lobby-players">' + players.map(function (player) {
+      var fixed = player.id === "aurex";
+      var selected = fixed || selectedAiIds.indexOf(player.id) >= 0;
+      var status = fixed ? "固定座位" : player.id === "chatgpt" ? (state.officialConnected ? "已连接" : "等待 ChatGPT 入座") : ["aevi","vex"].indexOf(player.id) >= 0 && !state.modelAvailable ? "Gateway 未配置" : selected ? "已选择" : "点选上桌";
+      return '<button class="lobby-player' + (selected ? " selected" : "") + (fixed ? " fixed" : " selectable") + '" type="button" ' + (fixed ? "disabled" : 'data-ai-player="' + player.id + '" aria-pressed="' + selected + '"') + '><img src="' + escapeAttr(avatarUrl(player)) + '" alt=""><strong>' + escapeHtml(player.name) + '</strong><span>' + escapeHtml(playerSource(player.id)) + '</span><span>' + status + '</span></button>';
+    }).join("") + '</div><button class="profile-open-button" type="button" data-open-settings="true">更换头像与昵称</button><p class="mode-note">' + escapeHtml(selectionNotes(selectedAiIds)) + '</p><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) {
+      return '<button class="round-option ' + (roundChoice === rounds ? "active" : "") + '" type="button" data-rounds="' + rounds + '">' + rounds + ' 局</button>';
+    }).join("") + '</div><button class="start-button" type="button" data-start="true" ' + (selectedAiIds.length === 2 && !unavailable ? "" : "disabled") + '>开桌</button><div class="leaderboard">' + (state.leaderboard || []).map(function (item, index) {
+      return '<span>' + (index + 1) + '. <strong>' + escapeHtml(item.name) + '</strong> ' + escapeHtml(signed(item.score)) + '</span>';
+    }).join("") + '</div></div></section><button class="settings-button" type="button" data-open-settings="true" aria-label="斗地主设置">⚙</button></div>';
   }
 
   function renderTable() {
     return (
-      '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<div class="mode-status">' + (state.match?.mode==='official'?'官端椒椒 · 老克模型可能产生费用 <button type="button" data-stop-model="true">停止整场游戏</button>':state.match?.mode==='model'?'椒椒·老克模型 · 可能产生费用 <button type="button" data-stop-model="true">停止模型场</button>':'本地策略 · 不调用付费模型') + '</div>' +
+       '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<div class="mode-status">' + escapeHtml(state.players.filter(function (p) { return p.id !== "aurex"; }).map(function (p) { return playerSource(p.id); }).join(" ＋ ")) + (state.match?.mode !== "local" ? ' <button type="button" data-stop-model="true">停止整场游戏</button>' : '') + '</div>' +
       state.players.map(renderSeat).join("") + renderCenter() + renderHand() + renderTurnActions() + renderFeedLine() + renderDissolveBanner() +
       '<button class="settings-button" type="button" data-open-settings="true" aria-label="斗地主设置">⚙</button>' +
       '<div class="table-tools"><button class="chat-button" type="button" data-open-chat="true" aria-label="对话"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.8 3v-3H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg></button><button class="interaction-button" type="button" data-open-interaction="true" aria-label="表情与道具">☺</button></div>' +
-      renderSettingsPanel() + renderChatDrawer() + renderInteractionDrawer() + renderResultPanel() + renderResultReopen() + "</div>"
+      renderInteractionDrawer() + renderResultPanel() + renderResultReopen() + "</div>"
     );
   }
 
   function render() {
     document.body.dataset.phase=state?.phase || "lobby";
     if (!state) {
-      game.innerHTML = '<div class="game-shell">' + renderBackButton() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">连接牌桌</span><h1>正在洗牌…</h1><p>连接 Aevi 家庭场的实时裁判服务。</p></div></section></div>';
+      scene.innerHTML = '<div class="game-shell">' + renderBackButton() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">连接牌桌</span><h1>正在洗牌…</h1><p>正在连接小家牌桌。</p></div></section></div>';
       return;
     }
     document.body.dataset.theme = state.theme || "jade";
-    game.innerHTML = state.phase === "lobby" ? renderLobby() : renderTable();
+    scene.innerHTML = state.phase === "lobby" ? renderLobby() : renderTable();
+    if (chatOpen && state.match) {
+      if (!chatLayer.firstChild) chatLayer.innerHTML = renderChatDrawer();
+      var log = chatLayer.querySelector(".table-chat-history");
+      var atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+      var items = matchTranscript().filter(function (item) { return item.round === state.match.roundNumber; });
+      var content = items.map(function (item) { return '<div class="table-chat-row"><time>' + escapeHtml(transcriptTime(item.at)) + '</time><strong>' + escapeHtml(transcriptPlayerName(item)) + '</strong><span>' + escapeHtml(socialText(item)) + '</span></div>'; }).join("") || '<p class="match-transcript-empty">还没有发言，打个招呼吧。</p>';
+      if (log.innerHTML !== content) { log.innerHTML = content; if (atBottom) log.scrollTop = log.scrollHeight; }
+    } else { chatLayer.replaceChildren(); chatOpen = false; }
+    if (settingsOpen) {
+      if (!settingsLayer.firstChild) settingsLayer.innerHTML = renderSettingsPanel();
+      settingsLayer.querySelectorAll("[data-profile-avatar]").forEach(function (img) { var player = playerById(img.dataset.profileAvatar); if (player) img.src = avatarUrl(player); });
+      settingsLayer.querySelectorAll("[data-theme-option]").forEach(function (button) { button.classList.toggle("active", button.dataset.themeOption === state.theme); });
+    } else settingsLayer.replaceChildren();
     updateTimerVisual();
   }
 
@@ -981,15 +1018,6 @@
   game.addEventListener("click", function (event) {
     var button = event.target.closest("button");
     if (!button) return;
-    if (button.hasAttribute("data-table-back")) {
-      window.parent.postMessage({ type: "aevi:doudizhu-back" }, location.origin);
-      return;
-    }
-    if (button.hasAttribute("data-player-mode")) {
-      playerMode=button.dataset.playerMode;
-      if(playerMode!=="local")selectedAiIds=["aevi","vex"];
-      render();return;
-    }
     if(button.hasAttribute("data-stop-model")){postAction({type:"stop_model_match"}).catch(function(){});return;}
     if (button.hasAttribute("data-rounds")) {
       roundChoice = Number(button.dataset.rounds);
@@ -1010,7 +1038,7 @@
       return;
     }
     if (button.hasAttribute("data-start")) {
-      postAction({ type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2), mode:playerMode }).catch(function () {});
+      postAction({ type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2), mode:"mixed" }).catch(function () {});
       return;
     }
     if (button.hasAttribute("data-card")) {
@@ -1081,9 +1109,14 @@
       postAction({ type: "request_dissolve" }).catch(function () {});
       return;
     }
+    if (button.hasAttribute("data-close-chat-button")) { chatOpen = false; render(); return; }
     if (button.hasAttribute("data-send-chat")) {
       var chatInput = document.querySelector("[data-chat-input]");
-      if (chatInput && chatInput.value.trim()) postAction({ type: "chat", text: chatInput.value.trim() }).then(function () { chatOpen = false; render(); }).catch(function () {});
+      if (chatInput && chatInput.value.trim() && !button.disabled) {
+        var draft = chatInput.value;
+        button.disabled = true;
+        postAction({ type: "chat", text: draft.trim() }).then(function () { if (chatInput.value === draft) chatInput.value = ""; }).catch(function () {}).finally(function () { button.disabled = false; });
+      }
       return;
     }
     if (button.hasAttribute("data-emote")) {
@@ -1126,7 +1159,7 @@
     if (button.hasAttribute("data-exit-doudizhu")) {
       button.disabled = true;
       postAction({ type: "return_lobby" }).catch(function () {}).finally(function () {
-        window.parent.postMessage({ type: "aevi:doudizhu-back" }, location.origin);
+        window.top.location.assign("/");
       });
       return;
     }
@@ -1187,7 +1220,7 @@
   });
 
   game.addEventListener("keydown", function (event) {
-    if (event.key === "Enter" && event.target.hasAttribute("data-chat-input")) {
+    if (!event.isComposing && event.keyCode !== 229 && event.key === "Enter" && event.target.hasAttribute("data-chat-input")) {
       event.preventDefault();
       var send = document.querySelector("[data-send-chat]");
       if (send) send.click();
