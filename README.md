@@ -1,12 +1,18 @@
 # Aevi 家庭斗地主
 
-## 官端 ChatGPT MCP 席位（本地实现，未部署）
+## 官端 ChatGPT MCP 席位（已部署 TEST，整场待验收）
 
-2026-09-07：在 `codex/tidal-entertainment` 的 `f1390c5` 基础上新增官端席位。
-当前代码尚未提交或部署；本地规则、模式、席位及 MCP HTTP 测试已通过，
-用户已在新 ChatGPT 会话完成入座与一次出牌验收（对 4 接对 3，页面回复报告
-accepted）；按用户要求不重复测试。连续整场与断线恢复未验收。不要把下方既有 TEST 部署记录理解为
-这项 MCP 功能已经上线。Tidal 与 Gateway 本次未修改。
+2026-09-07：`codex/tidal-entertainment` 功能提交 `98861dc` 已推送并部署既有
+TEST `next-doudizhu`（服务 `6a9ea64fe31b231aae396c56`，首个部署
+`6a9ed7953aa3b4323a8b8114`）。本地全套测试、容器生命周期检查和云端镜像
+构建通过；运行日志确认游戏与 0.0.14 隧道启动，ChatGPT 刷新发现六个正式工具。
+登录后的线上大厅显示官端按钮，重启前后的积分 +6/-3/-3/0 保留。
+连续整场、后台运行和断线恢复尚未验收。此前本地单次出牌已有用户验收，
+不能将它写成线上整局验收。Tidal/Relay/Gateway 本次均未修改或部署。
+
+应用复用既有隧道 `tunnel_6a9eb7a753d88191a3dcc0a33b3a6ba3`；运行密钥由
+用户直接填写 Zeabur Variable，应用 ID 为 `asdk_app_6a9ebf082270819183c17e98d09c94f3`。
+上述 ID 不是密钥。原电脑临时探测隧道已停止，不再依赖电脑常开。
 
 同一个裁判进程可额外监听 `127.0.0.1:<DOUDIZHU_MCP_PORT>/mcp`。
 变量未配置时关闭入口。公开 HTTP/WebSocket 服务不会提供 `/mcp`，也不新增
