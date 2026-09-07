@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import {mock} from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { DoudizhuService } from '../src/doudizhu-service.js';
@@ -22,11 +23,16 @@ try {
   const {tools} = await client.listTools();
   assert.deepEqual(tools.map(t => t.name).sort(), ['interact_table','join_table','leave_table','read_turn','submit_action','wait_for_event']);
   assert.equal(tools.find(t => t.name === 'submit_action').annotations.readOnlyHint, false);
-  const invoke = (name, args = {}) => client.callTool({name, arguments: args});
-  const joined = await invoke('join_table');
+  const identity = {'openai/subject':'test-user','openai/session':'test-chat'};
+  const invoke = (name, args = {}, meta = identity) => client.callTool({name, arguments: args, _meta:meta});
+  assert.equal((await invoke('join_table', {instance_id:crypto.randomUUID()}, {})).isError, true, 'missing trusted identity fails closed');
+  assert.equal((await invoke('join_table', {instance_id:crypto.randomUUID(), owner:'test-user'})).isError, true, 'self-reported identity is not a tool argument');
+  const joined = await invoke('join_table', {instance_id:crypto.randomUUID()});
   assert.ok(!joined.isError);
   const {lease_id} = joined.structuredContent;
-  assert.equal((await invoke('join_table')).isError, true);
+  assert.equal((await invoke('read_turn', {lease_id}, {...identity,'openai/subject':'other-user'})).isError, true);
+  assert.equal((await invoke('read_turn', {lease_id}, {...identity,'openai/session':'other-chat'})).isError, true);
+  assert.equal((await invoke('join_table', {instance_id:crypto.randomUUID()})).structuredContent.status, 'controller_active');
   assert.equal((await invoke('read_turn', {lease_id: 'invalid'})).isError, true);
   await game.startMatch(4, ['chatgpt','vex'], 'official');
   game.clearTimers();
@@ -56,7 +62,22 @@ try {
   assert.equal((await invoke('submit_action', args)).isError, true);
   game.clearTimers();
   assert.equal(game.state.round.bidHistory[0].source, 'mcp');
-  assert.equal((await invoke('leave_table', {lease_id})).structuredContent.left, true);
+  mock.timers.enable({apis:['Date'], now:Date.now()});
+  mock.timers.tick(121_000);
+  assert.equal((await invoke('join_table', {instance_id:crypto.randomUUID()}, {...identity,'openai/subject':'other-user'})).isError, true);
+  const replacementMeta = {...identity,'openai/session':'new-chat'};
+  const candidates = await Promise.all([1,2].map(() => invoke('join_table', {instance_id:crypto.randomUUID()}, replacementMeta)));
+  assert.equal(candidates.filter(r => r.structuredContent?.status==='resumed').length, 1, 'only one recovery wins');
+  assert.equal(candidates.filter(r => r.structuredContent?.status==='controller_active').length, 1);
+  const replacement = candidates.find(r => r.structuredContent?.status==='resumed').structuredContent.lease_id;
+  assert.notEqual(replacement, lease_id);
+  assert.equal((await invoke('read_turn', {lease_id:replacement}, replacementMeta)).structuredContent.match_id, view.match_id);
+  assert.equal((await invoke('interact_table', {...interaction,lease_id:replacement}, replacementMeta)).structuredContent.duplicate, true, 'recovery preserves interaction receipts');
+  for (const [name, parameters] of [['read_turn',{lease_id}],['submit_action',args],['interact_table',interaction],['leave_table',{lease_id}]]) {
+    assert.equal((await invoke(name, parameters)).isError, true, `old controller cannot ${name}`);
+  }
+  assert.equal((await invoke('leave_table', {lease_id:replacement}, replacementMeta)).structuredContent.left, true);
+  mock.timers.reset();
   assert.equal((await invoke('read_turn', {lease_id})).isError, true);
   for (const headers of [{Origin:'https://untrusted.example'}, {Host:'untrusted.example'}]) {
     const status = await new Promise((resolve, reject) => {
@@ -69,8 +90,9 @@ try {
   assert.equal((await fetch(url, {method:'POST', body:'x'.repeat(32769)})).status, 413);
   assert.equal((await fetch(url, {method:'POST', body:'{'})).status, 400);
   assert.equal((await fetch(url)).status, 405);
-  console.log('MCP HTTP: SDK handshake, four tools, seat privacy, strict actions and loopback boundary passed');
+  console.log('MCP HTTP: six tools, host identity, concurrent recovery, old-controller fencing, idempotency and loopback boundary passed');
 } finally {
+  mock.timers.reset();
   await client.close();
   if (server) await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
   game.clearTimers();

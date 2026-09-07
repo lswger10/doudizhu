@@ -28,8 +28,9 @@ const contentTypes = new Map([
 ]);
 
 const doudizhu = new DoudizhuService({ rootDir, dataDir });
+if (doudizhu.modelAdapter) doudizhu.modelAdapter.isConnected = () => false;
 await doudizhu.ready();
-await doudizhu.stopModelMatch();
+if (doudizhu.state.match?.mode !== 'official') await doudizhu.stopModelMatch();
 const mcpServer = process.env.DOUDIZHU_MCP_PORT
   ? await startMcpServer(doudizhu, Number(process.env.DOUDIZHU_MCP_PORT)) : null;
 
@@ -151,7 +152,9 @@ function sendSocket(ws, message) {
 
 wss.on("connection", async (ws) => {
   ws.on("close", () => {
-    if (![...wss.clients].some(client => client.readyState === WebSocket.OPEN)) void doudizhu.enqueue(() => doudizhu.stopModelMatch());
+    if (![...wss.clients].some(client => client.readyState === WebSocket.OPEN)) void doudizhu.enqueue(() => {
+      if (doudizhu.state.match?.mode !== 'official') return doudizhu.stopModelMatch();
+    });
   });
   ws.isAlive = true;
   ws.on("pong", () => {

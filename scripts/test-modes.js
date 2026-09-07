@@ -26,7 +26,7 @@ try {
  // Every pair uses the selected seat's controller, including two different Jiaos.
  const roster=['aevi','vex','chatgpt','juhua'];
  service.runAiTurn=async()=>{};
- const lease=await service.joinOfficial();
+ const lease=await service.joinOfficial({owner:'test-owner',session:'test-session'}, crypto.randomUUID());
  for(let a=0;a<roster.length;a++) for(let b=a+1;b<roster.length;b++) {
    const pair=[roster[a],roster[b]];
    await service.startMatch(4,pair,'mixed');service.clearTimers();

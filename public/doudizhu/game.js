@@ -424,7 +424,7 @@
     return '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">小家娱乐室</span><h1>一起打牌吧</h1><p>你固定占一席，请选择另外两位不同牌友。开局后不能换人。</p><div class="lobby-players">' + players.map(function (player) {
       var fixed = player.id === "aurex";
       var selected = fixed || selectedAiIds.indexOf(player.id) >= 0;
-      var status = fixed ? "固定座位" : player.id === "chatgpt" ? (state.officialConnected ? "已连接" : "等待 ChatGPT 入座") : ["aevi","vex"].indexOf(player.id) >= 0 && !state.modelAvailable ? "Gateway 未配置" : selected ? "已选择" : "点选上桌";
+      var status = fixed ? "固定座位" : player.id === "chatgpt" ? (state.officialConnected ? "已留座" : "等待 ChatGPT 入座") : ["aevi","vex"].indexOf(player.id) >= 0 && !state.modelAvailable ? "Gateway 未配置" : selected ? "已选择" : "点选上桌";
       return '<button class="lobby-player' + (selected ? " selected" : "") + (fixed ? " fixed" : " selectable") + '" type="button" ' + (fixed ? "disabled" : 'data-ai-player="' + player.id + '" aria-pressed="' + selected + '"') + '><img src="' + escapeAttr(avatarUrl(player)) + '" alt=""><strong>' + escapeHtml(player.name) + '</strong><span>' + escapeHtml(playerSource(player.id)) + '</span><span>' + status + '</span></button>';
     }).join("") + '</div><button class="profile-open-button" type="button" data-open-settings="true">更换头像与昵称</button><p class="mode-note">' + escapeHtml(selectionNotes(selectedAiIds)) + '</p><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) {
       return '<button class="round-option ' + (roundChoice === rounds ? "active" : "") + '" type="button" data-rounds="' + rounds + '">' + rounds + ' 局</button>';

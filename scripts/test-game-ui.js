@@ -20,8 +20,8 @@ const request=async(payload)=>{const r=await fetch(origin+'/api/doudizhu/action'
 try {
   for(let i=0;;i++){try{if((await fetch(origin+'/api/doudizhu/health')).ok)break;}catch{}if(i>100)throw Error(output);await new Promise(r=>setTimeout(r,50));}
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`)));
-  const invoke=async(name,args={})=>{const r=await client.callTool({name,arguments:args});assert.ok(!r.isError,JSON.stringify(r));return r.structuredContent;};
-  const {lease_id}=await invoke('join_table');
+  const invoke=async(name,args={})=>{const r=await client.callTool({name,arguments:args,_meta:{'openai/subject':'test-user','openai/session':'test-chat'}});assert.ok(!r.isError,JSON.stringify(r));return r.structuredContent;};
+  const {lease_id}=await invoke('join_table', {instance_id:crypto.randomUUID()});
   browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
   const page=await browser.newPage({viewport:{width:1280,height:800}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -76,13 +76,15 @@ try {
   await page.locator('[data-close-chat-button]').click();await page.getByRole('link',{name:'返回小家'}).click();await page.getByRole('heading',{name:'小家主页'}).waitFor();
   await page.route(origin+'/test-house',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<iframe src="/doudizhu/" style="width:100%;height:700px"></iframe>'}));
   await page.goto(origin+'/test-house');await page.frameLocator('iframe').getByRole('link',{name:'返回小家'}).click();await page.getByRole('heading',{name:'小家主页'}).waitFor();
+  assert.equal((await invoke('read_turn',{lease_id})).match_id, turn.match_id, 'closing the last browser must preserve the official match and seat');
+  await request({type:'stop_model_match'});
   await page.setViewportSize({width:360,height:800});await page.goto(origin+'/doudizhu/');
   await page.locator('[data-ai-player="chatgpt"]').waitFor();
   assert.ok(await page.locator('[data-start]').isVisible());
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   if(process.env.DDZ_SCREENSHOT_DIR) await page.screenshot({path:path.join(process.env.DDZ_SCREENSHOT_DIR,'lobby-mobile.png')});
   assert.deepEqual(errors,[]);
-  console.log('Browser: independent selection, persisted name/avatar, live play during IME, social history, desktop/mobile and direct/iframe home navigation passed');
+  console.log('Browser: independent selection, persisted name/avatar, live play during IME, social history, disconnect retains official match, explicit stop and desktop/mobile home navigation passed');
 } finally {
   await client.close();await browser?.close();
   child.kill();await new Promise(r=>child.exitCode!==null?r():child.once('exit',r));

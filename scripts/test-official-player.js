@@ -12,13 +12,13 @@ const service = new DoudizhuService({ dataDir: dir, adapter, modelAdapter: adapt
 try {
   await service.ready();
   assert.equal(typeof service.joinOfficial, 'function', 'an external player must be able to claim an independent seat');
-  const { lease_id: lease } = await service.joinOfficial();
+  const { lease_id: lease } = await service.joinOfficial({owner:'test-owner',session:'test-session'}, crypto.randomUUID());
   await service.updateProfile('chatgpt', {name:'椒椒测试名'});
   assert.equal(service.profiles.players.chatgpt.name, '椒椒测试名', 'display alias must not swallow stored profile edits');
   assert.equal(service.profile('chatgpt').name, '椒椒测试名');
   assert.equal(service.profile('aevi').name, '椒椒');
   assert.equal((await service.leaveOfficial(lease, true)).left, false, 'an obsolete expiry callback must not release a renewed lease');
-  await assert.rejects(service.joinOfficial(), /occupied/);
+  assert.equal((await service.joinOfficial({owner:'test-owner',session:'test-session'}, crypto.randomUUID())).status, 'controller_active');
   await assert.rejects(service.readOfficial('wrong'), /lease/);
   assert.equal(JSON.stringify(service.publicSnapshot()).includes(lease), false);
   service.playerConfig('vex').kind = 'human';
@@ -59,7 +59,16 @@ try {
   assert.equal((await service.interactOfficial(lease, changed.match_id, changed.cursor, reply)).duplicate, true);
   await assert.rejects(service.interactOfficial(lease, changed.match_id, changed.cursor, {type:'chat',text:'不同'}), /different/);
   const afterChat = await service.readOfficial(lease);
+  const saveState = service.saveState.bind(service);
+  service.saveState = async () => {
+    await saveState();
+    const stored = JSON.parse(await fs.readFile(service.stateFile, 'utf8'));
+    if (stored.round.propUses.chatgpt > 0) {
+      assert.ok(stored.officialSeat.interactions.some(([id]) => id===afterChat.cursor), 'every recoverable prop write must include its deduplication receipt');
+    }
+  };
   const thrown = await service.interactOfficial(lease, afterChat.match_id, afterChat.cursor, {type:'prop', prop:'tomato', target_id:'aurex'});
+  service.saveState = saveState;
   assert.equal(thrown.accepted, true);
   assert.equal(service.state.round.propUses.chatgpt, 1);
   assert.ok(service.publicSnapshot().match.chatTranscript.some(e => e.prop === 'tomato'));
@@ -108,13 +117,14 @@ try {
 
   const last = await service.readOfficial(lease);
   const onLeave = service.waitOfficial(lease, last.cursor, 1000);
+  const leaveCheck = assert.rejects(onLeave, /lease/);
   await service.leaveOfficial(lease);
-  assert.equal((await onLeave).match_id, null);
+  await leaveCheck;
   assert.equal(service.state.phase, 'lobby');
   assert.equal(service.history.at(-1).status, 'stopped');
   await assert.rejects(service.readOfficial(lease), /lease/);
   await assert.rejects(service.startMatch(4, ['chatgpt','vex'], 'official'), /connected/);
-  const second = await service.joinOfficial();
+  const second = await service.joinOfficial({owner:'test-owner',session:'test-session'}, crypto.randomUUID());
   await service.startMatch(4, ['chatgpt','vex'], 'official');
   service.clearTimers();
   service.state.phase = 'match_end';
