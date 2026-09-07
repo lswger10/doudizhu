@@ -28,6 +28,7 @@ const contentTypes = new Map([
 
 const doudizhu = new DoudizhuService({ rootDir, dataDir });
 await doudizhu.ready();
+await doudizhu.stopModelMatch();
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -139,12 +140,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 const wss = new WebSocketServer({ noServer: true, maxPayload: 512 * 1024 });
+if (doudizhu.modelAdapter) doudizhu.modelAdapter.isConnected = () => [...wss.clients].some(client => client.readyState === WebSocket.OPEN);
 
 function sendSocket(ws, message) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message));
 }
 
 wss.on("connection", async (ws) => {
+  ws.on("close", () => {
+    if (![...wss.clients].some(client => client.readyState === WebSocket.OPEN)) void doudizhu.enqueue(() => doudizhu.stopModelMatch());
+  });
   ws.isAlive = true;
   ws.on("pong", () => {
     ws.isAlive = true;

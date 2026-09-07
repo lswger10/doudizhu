@@ -9,7 +9,7 @@
     "test:adapters": "node scripts/test-doudizhu-adapters.js",
     "test:service": "node scripts/test-doudizhu-service.js",
     "test:standalone": "node scripts/test-standalone.js",
-    "test": "npm run test:rules && npm run test:adapters && npm run test:service && npm run test:standalone"
+    "test": "npm run test:rules && npm run test:adapters && npm run test:service && npm run test:standalone && node scripts/test-modes.js"
   },
   "engines": {
     "node": ">=18"

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { atomicWriteJson, withFileLock } from "./json-file-store.js";
+import { GatewayPlayerAdapter } from "./doudizhu-model-adapter.js";
 import { CommandPlayerAdapter, defaultDoudizhuPlayers } from "./doudizhu-adapters.js";
 import {
   PLAYER_IDS,
@@ -256,7 +257,7 @@ function roundPublicMove(entry) {
 }
 
 export class DoudizhuService {
-  constructor({ rootDir = process.cwd(), dataDir = path.resolve(process.cwd(), "data/doudizhu"), adapter = null } = {}) {
+  constructor({ rootDir = process.cwd(), dataDir = path.resolve(process.cwd(), "data/doudizhu"), adapter = null, modelAdapter = null } = {}) {
     this.rootDir = rootDir;
     this.dataDir = dataDir;
     this.stateFile = path.join(dataDir, "state.json");
@@ -266,6 +267,7 @@ export class DoudizhuService {
     this.historyFile = path.join(dataDir, "match-history.json");
     this.avatarDir = path.join(dataDir, "avatars");
     this.adapter = adapter || new CommandPlayerAdapter({ debug: process.env.AEVI_BRIDGE_DEBUG === "1" });
+    this.modelAdapter = modelAdapter || (process.env.DOUDIZHU_GATEWAY_URL && process.env.DOUDIZHU_SERVICE_KEY ? new GatewayPlayerAdapter(process.env.DOUDIZHU_GATEWAY_URL, process.env.DOUDIZHU_SERVICE_KEY) : null);
     this.players = defaultDoudizhuPlayers(rootDir);
     this.profiles = defaultProfiles(this.players);
     this.scores = defaultScores();
@@ -418,11 +420,13 @@ export class DoudizhuService {
       phase: this.state.phase,
       theme: this.state.theme,
       roundOptions: ROUND_OPTIONS,
+      modelAvailable: Boolean(this.modelAdapter),
       players,
       leaderboard: this.leaderboard(),
       match: this.state.match
         ? {
             id: this.state.match.id,
+            mode: this.state.match.mode || "local",
             totalRounds: this.state.match.totalRounds,
             roundNumber: this.state.match.roundNumber,
             status: this.state.match.status,
@@ -482,7 +486,25 @@ export class DoudizhuService {
     this.dissolveTimer = null;
   }
 
-  async startMatch(totalRounds, selectedAiIds = ["aevi", "vex"]) {
+  async decide(player, payload, options) {
+    return (this.state.match?.mode === "model" ? this.modelAdapter : this.adapter).decide(player, payload, options);
+  }
+
+  async stopModelMatch() {
+    if (this.state.match?.mode !== "model") return;
+    this.clearTimers();
+    this.modelAdapter?.cancel?.();
+    this.history.push({...this.state.match, status:"stopped", endedAt:nowIso()});
+    await this.saveHistory();
+    const theme=this.state.theme;
+    this.state={...defaultState(),theme};
+    await this.saveState();
+    this.broadcast();
+  }
+
+  async startMatch(totalRounds, selectedAiIds = ["aevi", "vex"], mode = "local") {
+    if (!["local","model"].includes(mode)) throw new Error("请选择有效模式");
+    if (mode === "model" && (!this.modelAdapter || selectedAiIds.length !== 2 || !selectedAiIds.includes("aevi") || !selectedAiIds.includes("vex"))) throw new Error("模型模式需要椒椒和老克同时上桌");
     const rounds = Number(totalRounds);
     if (!ROUND_OPTIONS.includes(rounds)) throw new Error("局数只能选择 4、8、16 或 24");
     if (this.state.match && this.state.phase !== "match_end" && this.state.phase !== "lobby") throw new Error("当前牌局还没有结束");
@@ -498,6 +520,7 @@ export class DoudizhuService {
       theme: this.state.theme,
       match: {
         id: `match_${randomUUID()}`,
+        mode,
         totalRounds: rounds,
         playerIds,
         roundNumber: 1,
@@ -572,7 +595,7 @@ export class DoudizhuService {
       },
     };
     try {
-      await this.adapter.decide(player, payload, { timeoutMs: 43_000 });
+      await this.decide(player, payload, { timeoutMs: 43_000 });
     } catch (error) {
       await this.addFeed({
         type: "adapter_error",
@@ -599,14 +622,15 @@ export class DoudizhuService {
       return;
     }
     const token = randomUUID();
-    const deadlineAt = Date.now() + TURN_MS;
+    const durationMs = this.state.match?.mode === "model" ? 60000 : TURN_MS;
+    const deadlineAt = Date.now() + durationMs;
     const playerId = this.state.round.currentPlayerId;
-    this.state.timer = { token, phase: this.state.phase, playerId, deadlineAt, durationMs: TURN_MS };
+    this.state.timer = { token, phase: this.state.phase, playerId, deadlineAt, durationMs };
     await this.saveState();
     this.broadcast();
     this.turnTimer = setTimeout(() => {
       void this.enqueue(() => this.handleTurnTimeout(token));
-    }, TURN_MS + 20);
+    }, durationMs + 20);
     this.turnTimer.unref?.();
     if (this.playerConfig(playerId)?.kind === "cmd") {
       setTimeout(() => void this.runAiTurn(playerId, token, deadlineAt), 0).unref?.();
@@ -705,13 +729,14 @@ export class DoudizhuService {
   }
 
   async runAiChatReply(playerId, fromId, text) {
+    const matchId = this.state.match?.id;
     const player = this.playerConfig(playerId);
     if (!player || player.kind !== "cmd") return;
     let response = null;
     let lastError = "";
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < (this.state.match?.mode === "model" ? 1 : 2); attempt += 1) {
       try {
-        response = await this.adapter.decide(player, this.aiChatPayload(playerId, fromId, text, lastError), { timeoutMs: TURN_MS - 250 });
+        response = await this.decide(player, this.aiChatPayload(playerId, fromId, text, lastError), { timeoutMs: TURN_MS - 250 });
         if (response.action?.type !== "chat") throw new Error("牌桌聊天必须返回 chat 动作");
         lastError = "";
         break;
@@ -722,6 +747,7 @@ export class DoudizhuService {
       }
     }
     await this.enqueue(async () => {
+      if (this.state.match?.id !== matchId) return;
       if (!response) {
         await this.addFeed({
           type: "adapter_error",
@@ -739,13 +765,14 @@ export class DoudizhuService {
   }
 
   async runAiInteractionReply(playerId, event) {
+    const matchId = this.state.match?.id;
     const player = this.playerConfig(playerId);
     if (!player || player.kind !== "cmd") return;
     let response = null;
     let lastError = "";
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < (this.state.match?.mode === "model" ? 1 : 2); attempt += 1) {
       try {
-        response = await this.adapter.decide(player, this.aiInteractionPayload(playerId, event, lastError), { timeoutMs: TURN_MS - 250 });
+        response = await this.decide(player, this.aiInteractionPayload(playerId, event, lastError), { timeoutMs: TURN_MS - 250 });
         if (!String(response.say || "").trim() && !response.emote && !response.prop) throw new Error("互动反应不能为空");
         lastError = "";
         break;
@@ -756,6 +783,7 @@ export class DoudizhuService {
       }
     }
     await this.enqueue(async () => {
+      if (this.state.match?.id !== matchId) return;
       if (!response) {
         await this.addFeed({
           type: "adapter_error",
@@ -799,15 +827,16 @@ export class DoudizhuService {
   }
 
   async runAiTurn(playerId, token, deadlineAt) {
+    if (this.state.timer?.token !== token) return;
     const player = this.playerConfig(playerId);
     if (!player) return;
     let lastError = "";
     let response = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (let attempt = 0; attempt < (this.state.match?.mode === "model" ? 1 : 2); attempt += 1) {
       const remaining = deadlineAt - Date.now() - 120;
       if (remaining < 300) break;
       try {
-        response = await this.adapter.decide(player, this.aiPayload(playerId, lastError), { timeoutMs: remaining });
+        response = await this.decide(player, this.aiPayload(playerId, lastError), { timeoutMs: remaining });
         await this.enqueue(async () => {
           if (this.state.timer?.token !== token || this.state.round?.currentPlayerId !== playerId) throw new Error("回合已经结束");
           this.validateAiAction(playerId, response.action);
@@ -1145,7 +1174,7 @@ export class DoudizhuService {
   }
 
   async requestDissolve(playerId = "aurex") {
-    if (playerId !== "aurex") throw new Error("目前由 Aurex 发起解散");
+    if (playerId !== "aurex") throw new Error("目前由 薇薇 发起解散");
     if (!this.state.match || !["bid", "play", "round_end"].includes(this.state.phase)) throw new Error("现在不能申请解散");
     this.clearTimers();
     const resumePhase = this.state.phase;
@@ -1161,7 +1190,7 @@ export class DoudizhuService {
       votes: Object.fromEntries(this.activePlayerIds().map((id) => [id, id === "aurex" ? "yes" : "pending"])),
       createdAt: nowIso(),
     };
-    await this.addFeed({ type: "dissolve_request", playerId, text: "Aurex 发起了解散申请。" }, false);
+    await this.addFeed({ type: "dissolve_request", playerId, text: "薇薇 发起了解散申请。" }, false);
     await this.saveState();
     this.broadcast();
     this.dissolveTimer = setTimeout(() => {
@@ -1188,8 +1217,8 @@ export class DoudizhuService {
         scores: this.state.match?.scoreDeltas,
       },
       prompt: aurexDissolveIntent
-        ? `Aurex 刚刚说「${aurexDissolveIntent}」，现在申请解散。请优先照顾她的现实事情并同意。`
-        : "Aurex 申请解散当前比赛。你是否同意？请由你本人决定。",
+        ? `薇薇 刚刚说「${aurexDissolveIntent}」，现在申请解散。请优先照顾她的现实事情并同意。`
+        : "薇薇 申请解散当前比赛。你是否同意？请由你本人决定。",
       context: { match_id: this.state.match?.id, deadline_at: this.state.dissolveVote?.deadlineAt },
     };
   }
@@ -1204,7 +1233,7 @@ export class DoudizhuService {
         return;
       }
       const remaining = Math.max(300, deadlineAt - Date.now() - 100);
-      const response = await this.adapter.decide(player, this.dissolvePayload(playerId), { timeoutMs: remaining });
+      const response = await this.decide(player, this.dissolvePayload(playerId), { timeoutMs: remaining });
       agree = response.action.type === "vote_dissolve" && Boolean(response.action.agree);
     } catch {
       agree = false;
@@ -1255,7 +1284,8 @@ export class DoudizhuService {
     await this.ready();
     return this.enqueue(async () => {
       const type = cleanText(message.type, 40);
-      if (type === "start_match") await this.startMatch(message.totalRounds, message.aiPlayers);
+      if (type === "start_match") await this.startMatch(message.totalRounds, message.aiPlayers, message.mode);
+      else if (type === "stop_model_match") await this.stopModelMatch();
       else if (type === "start_next_round") await this.startNextRound();
       else if (type === "return_lobby") await this.returnLobby();
       else if (type === "bid") await this.applyBid(actorId, message.value);

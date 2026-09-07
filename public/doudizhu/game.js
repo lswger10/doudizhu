@@ -24,6 +24,7 @@
   var targetId = "aevi";
   var cardGesture = null;
   var suppressCardClickUntil = 0;
+  var playerMode = "local";
   var roundChoice = Number(localStorage.getItem("aevi_ddz_rounds") || 4);
   var musicVolume = clamp(Number(localStorage.getItem("aevi_ddz_music_volume") || 0.42), 0, 1);
   var effectVolume = clamp(Number(localStorage.getItem("aevi_ddz_effect_volume") || 0.74), 0, 1);
@@ -392,14 +393,14 @@
     var players = state.players || [];
     var selectedNames = selectedAiIds.map(function (id) { return (players.find(function (player) { return player.id === id; }) || {}).name || id; });
     return (
-      '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">Aurex × ' + escapeHtml(selectedNames.join(" × ")) + '</span><h1>家庭斗地主</h1><p>从名册点两位 AI 上桌 · 没选中的不会调用</p><div class="lobby-players">' +
+      '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">薇薇 × ' + escapeHtml(selectedNames.join(" × ")) + '</span><h1>家庭斗地主</h1><p>从名册点两位 AI 上桌 · 没选中的不会调用</p><div class="lobby-players">' +
       players.map(function (player) {
-        var fixed = player.id === "aurex";
-        var selected = fixed || selectedAiIds.indexOf(player.id) >= 0;
-        var tag = fixed ? "固定座位" : selected ? "已上桌" : "点选上桌";
+        var fixed = player.id === "aurex" || playerMode === "model";
+        var selected = player.id === "aurex" || selectedAiIds.indexOf(player.id) >= 0;
+        var tag = player.id === "aurex" ? "固定座位" : selected ? "已上桌" : playerMode === "model" ? "仅本地模式" : "点选上桌";
         return '<button class="lobby-player' + (selected ? " selected" : "") + (fixed ? " fixed" : " selectable") + '" type="button" ' + (fixed ? "disabled" : 'data-ai-player="' + escapeAttr(player.id) + '"') + '><img src="' + escapeAttr(player.avatar) + '" alt="' + escapeAttr(player.name) + '"><strong>' + escapeHtml(player.name) + '</strong><span>' + tag + ' · 总分 ' + escapeHtml(signed(player.totalScore)) + "</span></button>";
       }).join("") +
-      '</div><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) {
+      '</div><div class="mode-picker"><button type="button" class="round-option ' + (playerMode==='local'?'active':'') + '" data-player-mode="local">本地策略</button><button type="button" class="round-option ' + (playerMode==='model'?'active':'') + '" data-player-mode="model" ' + (state.modelAvailable?'':'disabled') + '>椒椒·老克模型</button></div><p class="mode-note">' + (playerMode==='model'?'使用 Gateway 当前选定的 Profile。叫分、出牌和牌桌聊天可能产生费用，按供应商实际用量计费，每局价格无法预先确定。开局后不能切换模式。停止或关闭牌桌后，不再发起新的模型请求；已发出的请求可能已产生费用。':'不调用付费模型。开局后不能切换模式。') + '</p><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) {
         return '<button class="round-option ' + (roundChoice === rounds ? "active" : "") + '" type="button" data-rounds="' + rounds + '">' + rounds + " 局</button>";
       }).join("") + '</div><button class="start-button" type="button" data-start="true" ' + (selectedAiIds.length === 2 ? "" : "disabled") + '>开桌</button><div class="leaderboard">' + (state.leaderboard || []).map(function (item, index) {
         return '<span>' + (index + 1) + '. <strong>' + escapeHtml(item.name) + "</strong> " + escapeHtml(signed(item.score)) + "</span>";
@@ -410,7 +411,7 @@
 
   function renderTable() {
     return (
-      '<div class="game-shell">' + renderBackButton() + renderTopbar() +
+      '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<div class="mode-status">' + (state.match?.mode==='model'?'椒椒·老克模型 · 可能产生费用 <button type="button" data-stop-model="true">停止模型场</button>':'本地策略 · 不调用付费模型') + '</div>' +
       state.players.map(renderSeat).join("") + renderCenter() + renderHand() + renderTurnActions() + renderFeedLine() + renderDissolveBanner() +
       '<button class="settings-button" type="button" data-open-settings="true" aria-label="斗地主设置">⚙</button>' +
       '<div class="table-tools"><button class="chat-button" type="button" data-open-chat="true" aria-label="对话"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.8 3v-3H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg></button><button class="interaction-button" type="button" data-open-interaction="true" aria-label="表情与道具">☺</button></div>' +
@@ -419,6 +420,7 @@
   }
 
   function render() {
+    document.body.dataset.phase=state?.phase || "lobby";
     if (!state) {
       game.innerHTML = '<div class="game-shell">' + renderBackButton() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">连接牌桌</span><h1>正在洗牌…</h1><p>连接 Aevi 家庭场的实时裁判服务。</p></div></section></div>';
       return;
@@ -983,6 +985,12 @@
       window.parent.postMessage({ type: "aevi:doudizhu-back" }, location.origin);
       return;
     }
+    if (button.hasAttribute("data-player-mode")) {
+      playerMode=button.dataset.playerMode;
+      if(playerMode==="model")selectedAiIds=["aevi","vex"];
+      render();return;
+    }
+    if(button.hasAttribute("data-stop-model")){postAction({type:"stop_model_match"}).catch(function(){});return;}
     if (button.hasAttribute("data-rounds")) {
       roundChoice = Number(button.dataset.rounds);
       localStorage.setItem("aevi_ddz_rounds", String(roundChoice));
@@ -1002,7 +1010,7 @@
       return;
     }
     if (button.hasAttribute("data-start")) {
-      postAction({ type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2) }).catch(function () {});
+      postAction({ type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2), mode:playerMode }).catch(function () {});
       return;
     }
     if (button.hasAttribute("data-card")) {

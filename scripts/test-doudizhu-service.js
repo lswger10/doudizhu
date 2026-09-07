@@ -142,7 +142,7 @@ async function cleanup(service, dataDir) {
     assert.equal(service.publicSnapshot("aurex").match.chatTranscript.length, 0, "整场结束前不应弹出结算聊天记录");
     service.state.phase = "match_end";
     const finalSnapshot = service.publicSnapshot("aurex");
-    assert.deepEqual(finalSnapshot.match.chatTranscript.map((item) => item.playerName), ["Aurex", "Aevi"]);
+    assert.deepEqual(finalSnapshot.match.chatTranscript.map((item) => item.playerName), ["薇薇", "椒椒"]);
     const persisted = JSON.parse(await fs.readFile(path.join(dataDir, "state.json"), "utf8"));
     assert.equal(persisted.match.chatTranscript.length, 2, "聊天记录必须随牌局状态持久化");
   } finally {
