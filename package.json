@@ -9,13 +9,15 @@
     "test:adapters": "node scripts/test-doudizhu-adapters.js",
     "test:service": "node scripts/test-doudizhu-service.js",
     "test:standalone": "node scripts/test-standalone.js",
-    "test": "npm run test:rules && npm run test:adapters && npm run test:service && npm run test:standalone && node scripts/test-modes.js"
+    "test": "npm run test:rules && npm run test:adapters && npm run test:service && npm run test:standalone && node scripts/test-modes.js && node scripts/test-official-player.js && node scripts/test-doudizhu-mcp.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "ws": "^8.18.3"
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ws": "^8.18.3",
+    "zod": "4.5.4"
   },
   "license": "MIT"
 }

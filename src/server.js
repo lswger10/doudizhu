@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
 import { DoudizhuService } from "./doudizhu-service.js";
+import { startMcpServer } from "./doudizhu-mcp.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(rootDir, "public");
@@ -29,6 +30,8 @@ const contentTypes = new Map([
 const doudizhu = new DoudizhuService({ rootDir, dataDir });
 await doudizhu.ready();
 await doudizhu.stopModelMatch();
+const mcpServer = process.env.DOUDIZHU_MCP_PORT
+  ? await startMcpServer(doudizhu, Number(process.env.DOUDIZHU_MCP_PORT)) : null;
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -199,6 +202,9 @@ server.listen(port, host, () => {
 
 function shutdown() {
   doudizhu.clearTimers();
+  clearTimeout(doudizhu.officialLeaseTimer);
+  mcpServer?.close();
+  mcpServer?.closeAllConnections();
   clearInterval(heartbeat);
   for (const client of wss.clients) client.close(1001, "server shutdown");
   server.close(() => process.exit(0));

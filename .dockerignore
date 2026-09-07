@@ -4,4 +4,6 @@
 !package-lock.json
 !src/**
 !scripts/doudizhu-bot-adapter.mjs
+!scripts/start-container.sh
+!scripts/test-container.sh
 !public/**

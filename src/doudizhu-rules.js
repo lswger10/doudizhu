@@ -244,3 +244,26 @@ export function cardPublicView(id) {
   const card = cardFromId(id);
   return card ? { id: card.id, rank: card.rank, suit: card.suit, value: card.value, label: card.label } : null;
 }
+
+export function legalPlays(hand, target = null) {
+  if (!Array.isArray(hand) || hand.length > 20 || new Set(hand).size !== hand.length || hand.some(id => !cardFromId(id))) throw new Error('invalid hand');
+  const groups = new Map();
+  for (const id of sortCardIds(hand).reverse()) {
+    const rank = cardFromId(id).value;
+    if (!groups.has(rank)) groups.set(rank, []);
+    groups.get(rank).push(id);
+  }
+  const ranks = [...groups.values()];
+  const result = [];
+  // Suits are interchangeable for these rules: enumerate one representative per rank count.
+  function visit(index, cards) {
+    if (index === ranks.length) {
+      const move = classifyMove(cards);
+      if (move && (!target || canBeat(move, target))) result.push(cards);
+      return;
+    }
+    for (let count = 0; count <= ranks[index].length; count++) visit(index + 1, [...cards, ...ranks[index].slice(0, count)]);
+  }
+  visit(0, []);
+  return result.sort((a, b) => b.length - a.length || cardFromId(a[0]).value - cardFromId(b[0]).value);
+}
