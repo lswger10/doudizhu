@@ -16,6 +16,8 @@
 | 两个独立浏览器上下文，实际 DOM 私牌、同名不同 Guest、刷新原座、手机宽度 | 通过 | `scripts/test-game-ui.js`，本地 Edge + Playwright |
 | 原官端 UI、选人、资料/头像、IME、聊天道具、离开浏览器留座、直接/iframe 返回 | 通过 | 同一个 `scripts/test-game-ui.js`；没有替换原回归 |
 | 语法、diff 空白检查、静态资源版本 | 通过 | `node --check`、`git diff --check`、`test-standalone.js` |
+| 管理员旧主桌迁移：指定访客、陌生人拒绝、原名字/分数保留、幂等、活跃牌局/官端席位拒绝 | 通过 | `scripts/test-guest-rooms.js`，先红后绿，原真实裁判存储 |
+| 隧道等待 MCP 启动、子进程退出与凭据隔离 | 通过 | `bash scripts/test-container.sh`；等待参数缺失时失败 |
 
 `npm test` 已包含两份新增服务端回归。浏览器回归沿用开发机已安装的 Playwright：
 设置 `PLAYWRIGHT_MODULE` 为模块路径后运行 `node scripts/test-game-ui.js`；默认 `PLAYWRIGHT_CHANNEL=msedge`。

@@ -31,6 +31,7 @@ export class DoudizhuRooms {
     const registry = await read(path.join(this.dataDir, 'rooms.json'), null);
     this.records = registry?.rooms || {};
     this.legacyUnowned = registry ? registry.legacyUnowned : Boolean(await read(path.join(this.dataDir, 'state.json'), null));
+    await this.consumeClassicOwnerClaim();
     await this.saveRooms();
     this.classic = new DoudizhuService({ rootDir: this.rootDir, dataDir: this.dataDir });
     if (this.classic.modelAdapter) this.classic.modelAdapter.isConnected = () => false;
@@ -39,6 +40,32 @@ export class DoudizhuRooms {
     for (const room of Object.values(this.records)) if (!room.closed) await this.loadGame(room);
   }
   ready() { return this.readyPromise; }
+  async consumeClassicOwnerClaim() {
+    // Operator-only, one-time deployment request. No HTTP route writes this file.
+    const file = path.join(this.dataDir, 'classic-owner-claim.json');
+    const claim = await read(file, null);
+    if (!claim) return;
+    const source = this.records[claim.sourceRoom];
+    if (!source || source.kind !== 'friends') fail('CLASSIC_MIGRATION_SOURCE_INVALID');
+    this.requireGuest(source.owner);
+    const existing = Object.values(this.records).find(room => room.kind === 'classic');
+    if (existing) {
+      if (existing.owner !== source.owner || this.legacyUnowned) fail('CLASSIC_ALREADY_ASSIGNED');
+    } else {
+      const saved = await read(path.join(this.dataDir, 'state.json'), null);
+      if (!this.legacyUnowned || saved?.phase !== 'lobby' || saved?.officialSeat) fail('CLASSIC_MIGRATION_REQUIRES_IDLE');
+      let code;
+      do { code = randomBytes(6).toString('hex').toUpperCase(); } while (this.records[code]);
+      const profiles = await read(path.join(this.dataDir, 'profiles.json'), {});
+      const room = {code, kind:'classic', owner:source.owner, seats:{aurex:{guest:source.owner,
+        nickname:profiles.players?.aurex?.name || source.seats.aurex.nickname, left:false}}, closed:false};
+      const records = {...this.records, [code]:room};
+      await atomicWriteJson(path.join(this.dataDir, 'rooms.json'), {version:1, legacyUnowned:false, rooms:records});
+      this.records = records;
+      this.legacyUnowned = false;
+    }
+    await fs.unlink(file);
+  }
   // ponytail: one membership queue for this small single-process service; shard only if measured contention requires it.
   serial(operation) {
     const run = this.queue.then(operation);

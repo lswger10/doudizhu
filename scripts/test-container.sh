@@ -22,6 +22,7 @@ if [[ $1 == init ]]; then
   exit 0
 fi
 [[ ${CONTROL_PLANE_API_KEY:-} == synthetic-test-key ]] || exit 94
+[[ " $* " == *" --mcp.startup-wait-timeout 30s "* ]] || exit 95
 echo tunnel-start >> "$TEST_EVENTS"
 sleep 0.2
 exit 17

@@ -115,12 +115,55 @@ try {
   const legacyDir = path.join(dir,'legacy-fixture');
   await fs.mkdir(legacyDir);
   await fs.writeFile(path.join(legacyDir,'state.json'),'{}');
-  const legacy = new DoudizhuRooms({rootDir:process.cwd(),dataDir:legacyDir});
+  let legacy = new DoudizhuRooms({rootDir:process.cwd(),dataDir:legacyDir});
   try {
     await legacy.ready();
+    legacy.classic.scores.players.aurex.score=37;
+    legacy.classic.profiles.players.aurex.name='旧桌主人';
+    await legacy.classic.saveScores();await legacy.classic.saveProfiles();
     const guest = await legacy.guest();
     await assert.rejects(legacy.create(guest.id,{kind:'classic',nickname:'不能认领旧桌'}), /CLASSIC_OWNER_SETUP_REQUIRED/);
-    assert.ok((await legacy.create(guest.id,{kind:'friends',nickname:'独立新桌'})).code);
+    const source = await legacy.create(guest.id,{kind:'friends',nickname:'独立新桌'});
+    const stranger = await legacy.guest();
+    const claimFile = path.join(legacyDir,'classic-owner-claim.json');
+    const before = structuredClone(legacy.classic.state);
+    const scores = structuredClone(legacy.classic.scores);
+    legacy.close();
+    await fs.writeFile(claimFile, JSON.stringify({sourceRoom:source.code}));
+    legacy = new DoudizhuRooms({rootDir:process.cwd(),dataDir:legacyDir});
+    await legacy.ready();
+    const classic = legacy.list(guest.id).find(room=>room.kind==='classic');
+    assert.ok(classic, 'administrator migration binds the existing guest, not the first public visitor');
+    assert.equal(legacy.snapshot(guest.id,classic.code).selfSeat,'aurex');
+    assert.throws(()=>legacy.snapshot(stranger.id,classic.code),/ROOM_FORBIDDEN/);
+    assert.equal(legacy.binding(guest.id,classic.code).game,legacy.classic);
+    assert.deepEqual(legacy.classic.state.match,before.match);
+    assert.deepEqual(legacy.classic.scores.players,scores.players);
+    assert.equal(legacy.classic.scores.players.aurex.score,37);
+    assert.equal(legacy.snapshot(guest.id,classic.code).players.find(p=>p.id==='aurex').name,'旧桌主人');
+    await assert.rejects(fs.stat(claimFile), {code:'ENOENT'});
+    await assert.rejects(legacy.create(stranger.id,{kind:'classic',nickname:'抢桌'}),/CLASSIC_ALREADY_ASSIGNED/);
+    // A crash between committing membership and deleting the request is idempotent.
+    legacy.close();
+    await fs.writeFile(claimFile,JSON.stringify({sourceRoom:source.code}));
+    legacy = new DoudizhuRooms({rootDir:process.cwd(),dataDir:legacyDir});
+    await legacy.ready();
+    assert.equal(legacy.list(guest.id).find(room=>room.kind==='classic').code,classic.code);
+    await assert.rejects(fs.stat(claimFile),{code:'ENOENT'});
+    legacy.close();
+    // Never start the referee (which can resume timers) for an invalid migration request.
+    const registryFile=path.join(legacyDir,'rooms.json');
+    const registry=JSON.parse(await fs.readFile(registryFile,'utf8'));
+    delete registry.rooms[classic.code];registry.legacyUnowned=true;
+    await fs.writeFile(registryFile,JSON.stringify(registry));
+    for (const saved of [{...before,phase:'play'}, {...before,officialSeat:{owner:'synthetic'}}]) {
+      await fs.writeFile(path.join(legacyDir,'state.json'),JSON.stringify(saved));
+      await fs.writeFile(claimFile,JSON.stringify({sourceRoom:source.code}));
+      legacy=new DoudizhuRooms({rootDir:process.cwd(),dataDir:legacyDir});
+      await assert.rejects(legacy.ready(),/CLASSIC_MIGRATION_REQUIRES_IDLE/);
+      assert.equal(legacy.classic,undefined);
+      assert.deepEqual(JSON.parse(await fs.readFile(path.join(legacyDir,'state.json'),'utf8')),saved);
+    }
   } finally { legacy.close(); }
   console.log('Guest rooms: independent identities, private hands, spoof rejection, reconnect/restart, leave/end, room files/timers and fixed-view ablation passed');
 } finally {

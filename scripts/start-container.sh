@@ -30,7 +30,7 @@ env -u CONTROL_PLANE_API_KEY -u DOUDIZHU_SERVICE_KEY tunnel-client init \
   --health-listen-addr 127.0.0.1:8897
 (unset CONTROL_PLANE_API_KEY; exec node src/server.js) &
 game_pid=$!
-(unset DOUDIZHU_SERVICE_KEY; exec tunnel-client run --profile ddz-seat --profile-dir "$profile_dir") &
+(unset DOUDIZHU_SERVICE_KEY; exec tunnel-client run --profile ddz-seat --profile-dir "$profile_dir" --mcp.startup-wait-timeout 30s) &
 tunnel_pid=$!
 # A failed child ends this container; the platform owns restart policy.
 set +e
