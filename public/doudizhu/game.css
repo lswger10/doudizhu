@@ -950,3 +950,13 @@ body::after {
  body[data-phase="lobby"] .round-picker{flex-wrap:wrap}
  body[data-phase="lobby"] .topbar{max-width:65vw}
 }
+
+/* Room controls stay outside the frequently redrawn table (preserves input focus). */
+.room-panel { position: relative; z-index: 40; max-width: 420px; margin: 8vh auto; padding: 24px; display: grid; gap: 16px; }
+.room-panel label { display: grid; gap: 8px; }
+.room-panel input, .room-panel button, .room-status button { font: inherit; padding: 8px 12px; border-radius: 8px; }
+.room-status { position: fixed; top: 10px; left: 90px; z-index: 35; font-size: 12px; }
+.room-menu { position: absolute; top: 100%; left: 0; display: grid; gap: 8px; min-width: 180px; padding: 12px; background: #183e2e; border-radius: 8px; }
+.room-status summary { background: #f5ebd8; color: #243b30; padding: 6px; border-radius: 8px; }
+.room-panel[hidden], .room-status[hidden] { display: none; }
+@media (max-width: 600px) { .room-panel { margin: 12px; } .room-status { left: 85px; } }

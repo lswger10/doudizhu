@@ -15,17 +15,70 @@ const port=await freePort(), mcpPort=await freePort(), origin=`http://127.0.0.1:
 const child=spawn(process.execPath,['src/server.js'],{env:{...process.env,HOST:'127.0.0.1',PORT:String(port),DOUDIZHU_MCP_PORT:String(mcpPort),DOUDIZHU_DATA_DIR:dir,DOUDIZHU_GATEWAY_URL:'',DOUDIZHU_SERVICE_KEY:''},stdio:['ignore','pipe','pipe']});
 let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);
 const client=new Client({name:'ui-regression',version:'1'});
-let browser;
-const request=async(payload)=>{const r=await fetch(origin+'/api/doudizhu/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});const b=await r.json();assert.equal(b.ok,true,JSON.stringify(b));return b.data;};
+let browser, cookie='', roomCode='';
+const getState=async()=> (await (await fetch(origin+'/api/doudizhu/state?room='+roomCode,{headers:{cookie}})).json()).data;
+const request=async(payload)=>{if(['bid','play','pass'].includes(payload.type)){const state=await getState();payload={...payload,match_id:state.match.id,turn_id:state.timer.token};}const r=await fetch(origin+'/api/doudizhu/action?room='+roomCode,{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify(payload)});const b=await r.json();assert.equal(b.ok,true,JSON.stringify(b));return b.data;};
 try {
   for(let i=0;;i++){try{if((await fetch(origin+'/api/doudizhu/health')).ok)break;}catch{}if(i>100)throw Error(output);await new Promise(r=>setTimeout(r,50));}
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${mcpPort}/mcp`)));
   const invoke=async(name,args={})=>{const r=await client.callTool({name,arguments:args,_meta:{'openai/subject':'test-user','openai/session':'test-chat'}});assert.ok(!r.isError,JSON.stringify(r));return r.structuredContent;};
   const {lease_id}=await invoke('join_table', {instance_id:crypto.randomUUID()});
   browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL || 'msedge'});
+  const contextA=await browser.newContext({viewport:{width:1280,height:800}}), contextB=await browser.newContext({viewport:{width:390,height:844}});
+  const a=await contextA.newPage(), b=await contextB.newPage();
+  const guestErrors=[];for(const page of [a,b])page.on('pageerror',error=>guestErrors.push(error.message));
+  await a.goto(origin+'/doudizhu/');
+  await a.locator('#guest-name').fill('同名牌友');
+  await a.getByRole('button',{name:'创建朋友房间',exact:true}).click();
+  await a.locator('[data-start]').waitFor();
+  const friendCode=new URL(a.url()).searchParams.get('room');
+  await b.goto(origin+'/doudizhu/?room='+friendCode);
+  await b.locator('#guest-name').fill('同名牌友');
+  await b.getByRole('button',{name:'加入房间',exact:true}).click();
+  await b.locator('[data-start]').waitFor();
+  assert.ok(await b.locator('[data-start]').isDisabled());
+  const stateFor=async page=>(await (await page.request.get(origin+'/api/doudizhu/state?room='+friendCode)).json()).data;
+  const guestA=(await (await a.request.post(origin+'/api/doudizhu/guest')).json()).data.id;
+  const guestB=(await (await b.request.post(origin+'/api/doudizhu/guest')).json()).data.id;
+  assert.notEqual(guestA,guestB);
+  await a.locator('[data-start]').click();
+  for(let i=0;i<100;i++){
+    const va=await stateFor(a), vb=await stateFor(b);
+    if(va.phase==='play')break;
+    if(va.controls.isYourTurn)await a.locator('[data-bid="3"]').click();
+    else if(vb.controls.isYourTurn)await b.locator('[data-bid="3"]').click();
+    else await a.waitForTimeout(30);
+  }
+  assert.deepEqual(guestErrors,[]);
+  await a.locator('[data-card]').first().waitFor();await b.locator('[data-card]').first().waitFor();
+  const sa=await stateFor(a), sb=await stateFor(b);
+  assert.notEqual(sa.selfSeat,sb.selfSeat);
+  const handA=await a.locator('[data-card]').evaluateAll(els=>els.map(el=>el.dataset.card));
+  const handB=await b.locator('[data-card]').evaluateAll(els=>els.map(el=>el.dataset.card));
+  assert.deepEqual(handA,sa.round.hand.map(card=>card.id));
+  assert.deepEqual(handB,sb.round.hand.map(card=>card.id));
+  assert.ok(handA.every(id=>!handB.includes(id)));
+  assert.equal(await b.locator('[data-player="'+sb.selfSeat+'"]').getAttribute('data-seat'),'0');
+  await b.reload();await b.locator('[data-card]').first().waitFor();
+  assert.equal((await stateFor(b)).selfSeat,sb.selfSeat);
+  assert.equal((await (await b.request.post(origin+'/api/doudizhu/guest')).json()).data.id,guestB);
+  const attack=await a.request.post(origin+'/api/doudizhu/action?room='+friendCode,{data:{type:'bid',value:3,player_id:sb.selfSeat}});
+  assert.equal(attack.status(),403);
+  if(process.env.DDZ_SCREENSHOT_DIR){await fs.mkdir(process.env.DDZ_SCREENSHOT_DIR,{recursive:true});await a.screenshot({path:path.join(process.env.DDZ_SCREENSHOT_DIR,'friends-desktop.png')});await b.screenshot({path:path.join(process.env.DDZ_SCREENSHOT_DIR,'friends-mobile.png')});}
+  assert.ok(await b.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await contextB.close();assert.equal((await stateFor(a)).match.id,sa.match.id);
+  await a.locator('#room-status summary').click();
+  await a.getByRole('button',{name:'房主结束房间',exact:true}).click();
+  await a.locator('#room-panel').waitFor();await contextA.close();
+  console.log('Browser guest rooms: two isolated contexts, same nickname/different identity, private rendered hands, spoof denial, refresh seat and disconnect retention passed');
   const page=await browser.newPage({viewport:{width:1280,height:800}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(origin+'/doudizhu/');
+  await page.locator('#guest-name').fill('测试房主');
+  await page.locator('#room-panel summary').click();await page.getByRole('button',{name:'创建专用 AI 牌桌',exact:true}).click();
+  await page.locator('[data-ai-player="chatgpt"]').waitFor();
+  roomCode=new URL(page.url()).searchParams.get('room');
+  cookie=(await page.context().cookies()).filter(c=>c.name==='ddz_guest').map(c=>c.name+'='+c.value).join(';');
   await page.locator('[data-ai-player="chatgpt"]').click();
   await page.locator('[data-ai-player="juhua"]').click();
   assert.equal(await page.locator('[data-ai-player][aria-pressed="true"]').count(),2);
@@ -45,7 +98,7 @@ try {
   for(let i=0;i<100;i++){
     turn=await invoke('read_turn',{lease_id});
     if(turn.is_your_turn)break;
-    const state=(await (await fetch(origin+'/api/doudizhu/state')).json()).data;
+    const state=await getState();
     if(state.controls.isYourTurn)await request({type:'bid',value:0});
     await new Promise(r=>setTimeout(r,25));
   }
@@ -74,11 +127,11 @@ try {
   // Test the actual navigation target for both a direct page and the entertainment iframe.
   await page.route(origin+'/',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<h1>小家主页</h1>'}));
   await page.locator('[data-close-chat-button]').click();await page.getByRole('link',{name:'返回小家'}).click();await page.getByRole('heading',{name:'小家主页'}).waitFor();
-  await page.route(origin+'/test-house',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<iframe src="/doudizhu/" style="width:100%;height:700px"></iframe>'}));
+  await page.route(origin+'/test-house',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:'<iframe src="/doudizhu/?room='+roomCode+'" style="width:100%;height:700px"></iframe>'}));
   await page.goto(origin+'/test-house');await page.frameLocator('iframe').getByRole('link',{name:'返回小家'}).click();await page.getByRole('heading',{name:'小家主页'}).waitFor();
   assert.equal((await invoke('read_turn',{lease_id})).match_id, turn.match_id, 'closing the last browser must preserve the official match and seat');
   await request({type:'stop_model_match'});
-  await page.setViewportSize({width:360,height:800});await page.goto(origin+'/doudizhu/');
+  await page.setViewportSize({width:360,height:800});await page.goto(origin+'/doudizhu/?room='+roomCode);
   await page.locator('[data-ai-player="chatgpt"]').waitFor();
   assert.ok(await page.locator('[data-start]').isVisible());
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));

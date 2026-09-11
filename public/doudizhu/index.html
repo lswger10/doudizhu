@@ -6,9 +6,25 @@
     <meta name="theme-color" content="#244f38" />
     <title>小家 · 斗地主</title>
     <link rel="preload" as="image" href="/doudizhu/assets/themes/theme-jade.png" />
-    <link rel="stylesheet" href="/doudizhu/game.css?v=20260907freeplayers" />
+    <link rel="stylesheet" href="/doudizhu/game.css?v=20260911guestrooms" />
   </head>
   <body data-theme="jade">
+    <form id="room-panel" class="room-panel glass">
+      <h1>斗地主</h1>
+      <div id="room-resume" aria-label="我的牌桌"></div>
+      <label>昵称 <input id="guest-name" maxlength="12" autocomplete="nickname" required></label>
+      <button type="submit" value="friends">创建朋友房间</button>
+      <label>房间码 <input id="room-code" maxlength="12" autocomplete="off"></label>
+      <button type="submit" value="join">加入房间</button>
+      <details><summary>原有 AI 牌桌</summary><button type="submit" value="classic">创建专用 AI 牌桌</button></details>
+      <p id="room-error" role="alert"></p>
+    </form>
+    <details id="room-status" class="room-status" aria-label="当前房间" hidden>
+      <summary>房间 <strong data-room-code></strong></summary><div class="room-menu">
+      <button type="button" data-room-action="copy">复制邀请链接</button>
+      <button type="button" data-room-action="leave">我离开</button>
+      <button type="button" data-room-action="end" hidden>房主结束房间</button>
+    </div></details>
     <main id="game" aria-live="polite"></main>
     <div id="effects" aria-hidden="true"></div>
     <canvas id="particleCanvas" aria-hidden="true"></canvas>
@@ -16,6 +32,6 @@
     <audio id="soundBomb" preload="auto" src="/doudizhu/assets/sfx/bomb.wav"></audio>
     <audio id="soundSelect" preload="auto" src="/doudizhu/assets/sfx/select.ogg"></audio>
     <audio id="soundToast" preload="auto" src="/doudizhu/assets/sfx/toast.ogg"></audio>
-    <script defer src="/doudizhu/game.js?v=20260907seat"></script>
+    <script defer src="/doudizhu/game.js?v=20260911guestrooms"></script>
   </body>
 </html>

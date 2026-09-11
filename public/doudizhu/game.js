@@ -14,6 +14,81 @@
   var soundSelect = document.getElementById("soundSelect");
   var soundToast = document.getElementById("soundToast");
   var state = null;
+  var roomCode = new URLSearchParams(location.search).get("room") || "";
+  var roomActive = false;
+  var roomPanel = document.getElementById("room-panel");
+  var roomStatus = document.getElementById("room-status");
+  function roomUrl(endpoint) { return "/api/doudizhu/" + endpoint + "?room=" + encodeURIComponent(roomCode); }
+  function selfSeat() { return state && state.selfSeat; }
+  function friendsRoom() { return state && state.room && state.room.kind === "friends"; }
+  async function roomRequest(endpoint, body) {
+    var response = await fetch(roomUrl(endpoint), {method:"POST",credentials:"same-origin",headers:{"content-type":"application/json"},body:JSON.stringify(body || {})});
+    var payload = await response.json();
+    if (!response.ok) throw new Error(payload.error && payload.error.code || "ROOM_REQUEST_FAILED");
+    return payload.data;
+  }
+  function showEntry() {
+    roomActive = false;
+    window.clearTimeout(reconnectTimer);
+    if (socket) { socket.close(); socket = null; }
+    state = null;
+    scene.replaceChildren(); chatLayer.replaceChildren(); settingsLayer.replaceChildren();
+    roomPanel.hidden = false;
+    roomStatus.hidden = true;
+    document.getElementById("room-code").value = roomCode;
+    document.getElementById("guest-name").value = localStorage.getItem("ddz_nickname") || "";
+    fetch(roomUrl("rooms"), {credentials:"same-origin",cache:"no-store"}).then(function (response) { return response.json(); }).then(function (payload) {
+      var list = document.getElementById("room-resume");
+      list.replaceChildren();
+      if (!payload.ok) return;
+      payload.data.forEach(function (room) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "回到 " + (room.kind === "classic" ? "AI 牌桌 " : "朋友房间 ") + room.code;
+        button.addEventListener("click", async function () {
+          try { roomCode = room.code; await roomRequest("join", {nickname:room.nickname}); await enterRoom(); }
+          catch (error) { document.getElementById("room-error").textContent = error.message; }
+        });
+        list.appendChild(button);
+      });
+    }).catch(function () { document.getElementById("room-error").textContent = "ROOM_LIST_FAILED"; });
+  }
+  async function enterRoom() {
+    history.replaceState(null, "", location.pathname + "?room=" + encodeURIComponent(roomCode));
+    await fetchState();
+    roomActive = true;
+    roomPanel.hidden = true;
+    roomStatus.hidden = false;
+    connectSocket();
+  }
+  roomPanel.addEventListener("submit", async function (event) {
+    event.preventDefault();
+    var button = event.submitter;
+    if (!button) return;
+    var name = document.getElementById("guest-name").value.trim();
+    button.disabled = true;
+    try {
+      await roomRequest("guest");
+      var result;
+      if (button.value === "join") {
+        roomCode = document.getElementById("room-code").value.trim().toUpperCase();
+        result = await roomRequest("join", {nickname:name});
+      } else result = await roomRequest("rooms", {nickname:name,kind:button.value});
+      roomCode = result.code;
+      localStorage.setItem("ddz_nickname", name);
+      await enterRoom();
+    } catch (error) { document.getElementById("room-error").textContent = error.message; }
+    finally { button.disabled = false; }
+  });
+  roomStatus.addEventListener("click", async function (event) {
+    var action = event.target.dataset.roomAction;
+    if (!action) return;
+    try {
+      if (action === "copy") { await navigator.clipboard.writeText(location.origin + location.pathname + "?room=" + roomCode); return; }
+      await roomRequest(action);
+      showEntry();
+    } catch (error) { showError(error.message); }
+  });
   var socket = null;
   var reconnectTimer = 0;
   var reconnectAttempt = 0;
@@ -81,6 +156,7 @@
   }
 
   function playerSource(id) {
+    if (friendsRoom()) return id === selfSeat() ? "你" : playerById(id)?.kind === "human" ? "真人牌友" : "本地策略牌友";
     return {aurex:"你", aevi:"小树屋椒椒 · API", vex:"小树屋老克 · API", chatgpt:"官端 ChatGPT 椒椒", juhua:"本地牌友 · 策略"}[id] || "牌友";
   }
 
@@ -365,10 +441,10 @@
 
   function renderInteractionDrawer() {
     if (!interactionOpen) return "";
-    var targets = (state.players || []).filter(function (player) { return player.id !== "aurex"; });
+    var targets = (state.players || []).filter(function (player) { return player.id !== selfSeat(); });
     if (!targets.some(function (player) { return player.id === targetId; })) targetId = targets.length ? targets[0].id : "";
     var canProp = Boolean(state.round && targetId);
-    var own = playerById("aurex") || { propUses: 0 };
+    var own = playerById(selfSeat()) || { propUses: 0 };
     return (
       '<div class="drawer-backdrop" data-close-interaction="true"><section class="interaction-drawer" data-drawer-stop="true">' +
       '<div class="emote-grid">' + Array.from({ length: 13 }, function (_, index) {
@@ -408,7 +484,7 @@
     return (
       '<div class="modal-backdrop" data-close-settings="true"><section class="settings-panel glass" data-settings-stop="true">' +
       '<header class="panel-head"><div><span class="lobby-kicker">斗地主专属</span><h2>牌桌设置</h2></div><button class="close-button" type="button" data-close-settings-button="true">×</button></header>' +
-      '<section class="settings-section"><h3>头像与昵称</h3><div class="profile-editor-list">' + state.players.map(function (player) {
+      '<section class="settings-section"><h3>头像与昵称</h3><div class="profile-editor-list">' + state.players.filter(function (player) { return !friendsRoom() || player.id === selfSeat(); }).map(function (player) {
         return '<article class="profile-editor"><span>' + escapeHtml(playerSource(player.id)) + '</span><img data-profile-avatar="' + player.id + '" src="' + escapeAttr(avatarUrl(player)) + '" alt=""><input type="text" maxlength="12" value="' + escapeAttr(player.name) + '" data-name-input="' + player.id + '"><button type="button" data-save-name="' + player.id + '">保存昵称</button><button type="button" data-pick-avatar="' + player.id + '">更换头像</button><input hidden type="file" accept="image/png,image/jpeg,image/webp" data-avatar-input="' + player.id + '"></article>';
       }).join("") + "</div></section>" +
       '<section class="settings-section"><h3>桌布</h3><div class="theme-picker">' + themeButton("jade", "青玉桃花") + themeButton("sakura", "樱花软席") + themeButton("camp", "暮色营地") + themeButton("beach", "海岛蓝毯") + "</div></section>" +
@@ -419,6 +495,7 @@
   }
 
   function renderLobby() {
+    if (friendsRoom()) return '<div class="game-shell">' + renderBackButton() + '<section class="lobby"><div class="lobby-card glass"><h1>朋友牌桌</h1><p>开局前邀请朋友入座，空位由本地策略牌友补齐。开局后保留座位。</p><div class="lobby-players">' + state.players.map(function (p) { return '<div class="lobby-player"><strong>' + escapeHtml(p.name) + '</strong><span>' + escapeHtml(playerSource(p.id)) + '</span></div>'; }).join("") + '</div><button type="button" data-open-settings="true">更换头像与昵称</button><div class="round-picker">' + [4, 8, 16, 24].map(function (rounds) { return '<button class="round-option ' + (roundChoice === rounds ? 'active' : '') + '" type="button" data-rounds="' + rounds + '">' + rounds + ' 局</button>'; }).join("") + '</div><button class="start-button" type="button" data-start="true" ' + (state.room.isOwner ? '' : 'disabled') + '>开桌</button></div></section></div>';
     var players = state.players || [];
     var unavailable = selectedAiIds.some(function (id) { return (id === "chatgpt" && !state.officialConnected) || (["aevi","vex"].indexOf(id) >= 0 && !state.modelAvailable); });
     return '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">小家娱乐室</span><h1>一起打牌吧</h1><p>你固定占一席，请选择另外两位不同牌友。开局后不能换人。</p><div class="lobby-players">' + players.map(function (player) {
@@ -435,7 +512,7 @@
 
   function renderTable() {
     return (
-       '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<div class="mode-status">' + escapeHtml(state.players.filter(function (p) { return p.id !== "aurex"; }).map(function (p) { return playerSource(p.id); }).join(" ＋ ")) + (state.match?.mode !== "local" ? ' <button type="button" data-stop-model="true">停止整场游戏</button>' : '') + '</div>' +
+       '<div class="game-shell">' + renderBackButton() + renderTopbar() + '<div class="mode-status">' + escapeHtml(state.players.filter(function (p) { return p.id !== selfSeat(); }).map(function (p) { return playerSource(p.id); }).join(" ＋ ")) + (state.match?.mode !== "local" ? ' <button type="button" data-stop-model="true">停止整场游戏</button>' : '') + '</div>' +
       state.players.map(renderSeat).join("") + renderCenter() + renderHand() + renderTurnActions() + renderFeedLine() + renderDissolveBanner() +
       '<button class="settings-button" type="button" data-open-settings="true" aria-label="斗地主设置">⚙</button>' +
       '<div class="table-tools"><button class="chat-button" type="button" data-open-chat="true" aria-label="对话"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.8 3v-3H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/><path d="M7.5 9.5h9M7.5 12.5h6"/></svg></button><button class="interaction-button" type="button" data-open-interaction="true" aria-label="表情与道具">☺</button></div>' +
@@ -449,6 +526,9 @@
       scene.innerHTML = '<div class="game-shell">' + renderBackButton() + '<section class="lobby"><div class="lobby-card glass"><span class="lobby-kicker">连接牌桌</span><h1>正在洗牌…</h1><p>正在连接小家牌桌。</p></div></section></div>';
       return;
     }
+    roomStatus.querySelector("[data-room-code]").textContent = state.room.code;
+    roomStatus.querySelector('[data-room-action="end"]').hidden = !friendsRoom() || !state.room.isOwner;
+    roomStatus.querySelector('[data-room-action="copy"]').hidden = !friendsRoom();
     document.body.dataset.theme = state.theme || "jade";
     scene.innerHTML = state.phase === "lobby" ? renderLobby() : renderTable();
     if (chatOpen && state.match) {
@@ -922,7 +1002,11 @@
   async function postAction(message) {
     unlockAudio();
     try {
-      var response = await fetch("/api/doudizhu/action", {
+      if (["bid","play","pass"].indexOf(message.type) >= 0) {
+        message.match_id = state.match && state.match.id;
+        message.turn_id = state.timer && state.timer.token;
+      }
+      var response = await fetch(roomUrl("action"), {
         method: "POST",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
@@ -940,20 +1024,21 @@
 
   async function fetchState() {
     try {
-      var response = await fetch("/api/doudizhu/state", { credentials: "same-origin", cache: "no-store" });
+      var response = await fetch(roomUrl("state"), { credentials: "same-origin", cache: "no-store" });
       var payload = await response.json();
       if (!response.ok) throw new Error(payload.error && payload.error.message || "连接牌桌失败");
       acceptSnapshot(payload.data || payload);
     } catch (error) {
-      showError(error.message || "连接牌桌失败");
+      throw error;
     }
   }
 
   function connectSocket() {
+    if (!roomActive) return;
     window.clearTimeout(reconnectTimer);
     var scheme = location.protocol === "https:" ? "wss:" : "ws:";
     try {
-      socket = new WebSocket(scheme + "//" + location.host + "/api/doudizhu/ws");
+      socket = new WebSocket(scheme + "//" + location.host + roomUrl("ws"));
     } catch (_) {
       scheduleReconnect();
       return;
@@ -967,13 +1052,16 @@
       try {
         var message = JSON.parse(event.data);
         if (message.type === "snapshot") acceptSnapshot(message.data);
-        else if (message.type === "error") showError(message.error);
+        else if (message.type === "error") {
+          showError(message.error);
+          if (["SESSION_INVALID","ROOM_FORBIDDEN","ROOM_CLOSED"].indexOf(message.error) >= 0) showEntry();
+        }
       } catch (_) {}
     });
     socket.addEventListener("close", function () {
       connected = false;
       render();
-      scheduleReconnect();
+      if (roomActive) scheduleReconnect();
     });
     socket.addEventListener("error", function () { connected = false; });
   }
@@ -1038,7 +1126,7 @@
       return;
     }
     if (button.hasAttribute("data-start")) {
-      postAction({ type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2), mode:"mixed" }).catch(function () {});
+      postAction(friendsRoom() ? {type:"start_match",totalRounds:roundChoice} : { type: "start_match", totalRounds: roundChoice, aiPlayers: selectedAiIds.slice(0, 2), mode:"mixed" }).catch(function () {});
       return;
     }
     if (button.hasAttribute("data-card")) {
@@ -1238,8 +1326,7 @@
     } else updateMusic();
   });
 
-  render();
-  fetchState();
-  connectSocket();
+  showEntry();
+  roomRequest("guest").then(function () { if (roomCode) return enterRoom(); }).catch(function (error) { showEntry(); document.getElementById("room-error").textContent = error.message; });
   updateTimerVisual();
 })();

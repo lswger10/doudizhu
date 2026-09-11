@@ -1,5 +1,13 @@
 # 小家斗地主
 
+## 当前施工：Guest 多人朋友房间（2026-09-11）
+
+`codex/guest-rooms` 基于已核验的官端分支，加入独立 Guest、房间码、稳定席位和逐连接私有视角。
+本地实现与验证完成，未推送或部署；下文发布记录为历史版本，不代表本阶段已上线。
+当前事实见 [CURRENT_STATE](CURRENT_STATE.md)，实际验证见 [TEST_MATRIX](TEST_MATRIX.md)，
+架构边界见 [DECISIONS](DECISIONS.md)，交接限制见 [PITFALLS](PITFALLS.md)。
+旧存档不自动认领；原有单真人/API/官端玩法保留在专用 classic 房间。
+
 ## 当前修复：同一活跃 response 连续陪玩（MCP 1.3.1）
 
 基于 `7fece07`，只调整官端工具描述和操作回执中的下一跳指令，不新增 worker。

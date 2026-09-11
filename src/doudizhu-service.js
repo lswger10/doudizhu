@@ -269,9 +269,11 @@ function roundPublicMove(entry) {
 }
 
 export class DoudizhuService {
-  constructor({ rootDir = process.cwd(), dataDir = path.resolve(process.cwd(), "data/doudizhu"), adapter = null, modelAdapter = null } = {}) {
+  constructor({ rootDir = process.cwd(), dataDir = path.resolve(process.cwd(), "data/doudizhu"), adapter = null, modelAdapter = null, humanSeats = null } = {}) {
     this.rootDir = rootDir;
     this.dataDir = dataDir;
+    this.humanSeats = humanSeats;
+    this.suspended = false;
     this.stateFile = path.join(dataDir, "state.json");
     this.playersFile = path.join(dataDir, "players.json");
     this.profilesFile = path.join(dataDir, "profiles.json");
@@ -310,6 +312,9 @@ export class DoudizhuService {
     } else {
       await atomicWriteJson(this.playersFile, { version: 1, players: this.players });
     }
+    if (this.humanSeats) for (const player of this.players) {
+      if (PLAYER_IDS.includes(player.id)) player.kind = this.humanSeats.includes(player.id) ? "human" : "cmd";
+    }
     await atomicWriteJson(this.playersFile, { version: 1, players: this.players, updatedAt: nowIso() });
     this.profiles = normalizeProfiles(await readJson(this.profilesFile, null), this.players);
     this.scores = normalizeScores(await readJson(this.scoresFile, null));
@@ -340,7 +345,7 @@ export class DoudizhuService {
   }
 
   enqueue(operation) {
-    const run = this.operationQueue.then(operation, operation);
+    const run = this.operationQueue.then(() => this.suspended ? undefined : operation());
     this.operationQueue = run.catch(() => {});
     return run;
   }
@@ -867,6 +872,7 @@ export class DoudizhuService {
   }
 
   async scheduleTurn() {
+    if (this.suspended) return;
     clearTimeout(this.turnTimer);
     this.turnTimer = null;
     if (!["bid", "play"].includes(this.state.phase) || !this.state.round?.currentPlayerId) {
@@ -1533,9 +1539,10 @@ export class DoudizhuService {
     this.broadcast();
   }
 
-  async handleClientMessage(message = {}, actorId = "aurex") {
+  async handleClientMessage(message = {}, actorId = "aurex", authorize = () => {}) {
     await this.ready();
     return this.enqueue(async () => {
+      authorize();
       const type = cleanText(message.type, 40);
       if (type === "start_match") await this.startMatch(message.totalRounds, message.aiPlayers, message.mode);
       else if (type === "stop_model_match") {
